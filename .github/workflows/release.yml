@@ -16,6 +16,7 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  APPIMAGETOOL_VERSION: 1.9.1
 
 jobs:
   build:
@@ -60,8 +61,118 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  macos-dmg:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build macOS application
+        env:
+          GOOS: darwin
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/release-manifest.json"
+          mkdir -p dist/bin
+          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
+          BINARY="dist/bin/athena-launcher-${GOARCH}" VERSION="$version" ARCH="$GOARCH" ./packaging/macos/package-dmg.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: athena-dmg-${{ matrix.arch }}
+          path: dist/installers/*.dmg
+          if-no-files-found: error
+
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Windows launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_TAG.TrimStart("v")
+          $manifestUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/release-manifest.json"
+          New-Item -ItemType Directory -Force -Path dist/bin, dist/installers | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifestUrl" -o dist/bin/athena-launcher.exe .
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_TAG.TrimStart("v")
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $compiler "/DAppVersion=$version" "/DSourceExe=$pwd\dist\bin\athena-launcher.exe" "/DOutputDir=$pwd\dist\installers" packaging/windows/athena.iss
+      - uses: actions/upload-artifact@v7
+        with:
+          name: athena-windows-installer
+          path: dist/installers/*.exe
+          if-no-files-found: error
+
+  linux-appimage:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goarch: amd64
+            appimage_arch: x86_64
+          - runner: ubuntu-24.04-arm
+            goarch: arm64
+            appimage_arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Linux launcher
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/release-manifest.json"
+          mkdir -p dist/bin
+          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
+      - name: Build AppImage
+        env:
+          APPIMAGE_ARCH: ${{ matrix.appimage_arch }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/appimagetool.AppImage"
+          curl --fail --location --retry 3 "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${APPIMAGE_ARCH}.AppImage" --output "$tool"
+          chmod +x "$tool"
+          BINARY="dist/bin/athena-launcher-${GOARCH}" VERSION="${RELEASE_TAG#v}" ARCH="$APPIMAGE_ARCH" APPIMAGETOOL="$tool" ./packaging/linux/package-appimage.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: athena-appimage-${{ matrix.appimage_arch }}
+          path: dist/installers/*.AppImage
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [build, macos-dmg, windows-installer, linux-appimage]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -72,5 +183,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sha256sum release/* > SHA256SUMS-launchers.txt
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" release/* SHA256SUMS-launchers.txt --repo "$GITHUB_REPOSITORY" --clobber

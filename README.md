@@ -15,9 +15,24 @@ Athena Launcher 是一个零第三方 Go 依赖的单文件安装器和服务管
 
 ## 用户使用
 
+普通用户应从 GitHub Release 下载对应的桌面安装包：
+
+- `Athena_<version>_macOS_arm64.dmg`：Apple Silicon Mac。
+- `Athena_<version>_macOS_amd64.dmg`：Intel Mac。
+- `Athena-Setup_<version>_windows_amd64.exe`：Windows 10/11 64 位安装器。
+- `Athena_<version>_linux_x86_64.AppImage`：Linux x86_64。
+- `Athena_<version>_linux_aarch64.AppImage`：Linux ARM64。
+
+macOS 将 `Athena.app` 拖入 Applications 后双击，Windows 安装完成后可通过桌面或开始菜单启动。Linux AppImage 首次使用时需在文件属性中启用“允许作为程序执行”。桌面入口会启动本地服务，等待首次安装完成并自动打开浏览器。
+
+当前自动构建的安装包使用临时签名。公开大规模分发前，应配置 Apple Developer ID 公证和 Windows Authenticode 代码签名，避免系统显示“未知开发者”提示。
+
+命令行用户仍可下载原始单文件 launcher：
+
 发布版本应在编译时写入正式清单 URL，用户可直接运行：
 
 ```bash
+./athena-launcher launch
 ./athena-launcher start
 ./athena-launcher status
 ./athena-launcher stop

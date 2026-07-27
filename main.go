@@ -49,6 +49,8 @@ func run(args []string) error {
 	opts := options{command: command, home: absHome, manifestSource: manifestSource}
 
 	switch command {
+	case "launch":
+		return launchDesktop(opts)
 	case "start":
 		return startDetached(opts)
 	case "run":
@@ -76,6 +78,27 @@ func run(args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", command)
+	}
+}
+
+func launchDesktop(opts options) error {
+	if err := startDetached(opts); err != nil {
+		return err
+	}
+	address := fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort)
+	deadline := time.NewTimer(15 * time.Minute)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if healthyURL(address) {
+			return openBrowser(address)
+		}
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("Athena did not become ready within 15 minutes; inspect %s", filepath.Join(opts.home, "logs", "launcher.log"))
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -294,6 +317,7 @@ func printUsage() {
 	fmt.Println(`Athena one-file installer and service manager
 
 Usage:
+  athena-launcher launch  [--home PATH] [--manifest URL_OR_FILE]
   athena-launcher start   [--home PATH] [--manifest URL_OR_FILE]
   athena-launcher run     [--home PATH] [--manifest URL_OR_FILE]
   athena-launcher install [--home PATH] [--manifest URL_OR_FILE]
