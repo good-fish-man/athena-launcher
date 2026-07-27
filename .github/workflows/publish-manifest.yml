@@ -33,13 +33,13 @@ jobs:
           - linux-amd64
           - windows-amd64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Package PostgreSQL
         env:
           PLATFORM: ${{ matrix.platform }}
           OUTPUT_DIR: dist/postgres
         run: ./scripts/package-postgres.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: postgres-${{ matrix.platform }}
           path: dist/postgres/*
@@ -49,12 +49,12 @@ jobs:
     needs: postgres
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: postgres-*
           path: release-assets
@@ -82,7 +82,7 @@ jobs:
         run: |
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
           gh release upload "$RELEASE_TAG" release-assets/postgres_* release-manifest.json SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-manifest
           path: |
