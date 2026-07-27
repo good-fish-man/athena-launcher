@@ -1,7 +1,7 @@
 VERSION ?= 0.1.0
 MANIFEST_URL ?=
 DIST ?= dist
-LDFLAGS := -s -w -X main.defaultManifestURL=$(MANIFEST_URL)
+LDFLAGS := -s -w -X main.launcherVersion=$(VERSION) -X main.defaultManifestURL=$(MANIFEST_URL)
 PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
 
 .PHONY: test build release clean

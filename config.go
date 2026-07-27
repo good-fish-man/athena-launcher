@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	launcherVersion        = "0.1.0"
 	defaultManifestName    = "release-manifest.json"
 	defaultDatabaseName    = "agent_runtime"
 	defaultDatabaseUser    = "athena"
@@ -23,9 +22,11 @@ const (
 	defaultClientHTTPPort  = 8090
 )
 
-// defaultManifestURL can be injected at build time with:
-// -ldflags "-X main.defaultManifestURL=https://example.com/release-manifest.json".
-var defaultManifestURL string
+// Release metadata can be injected at build time with -ldflags.
+var (
+	launcherVersion     = "0.1.0"
+	defaultManifestURL string
+)
 
 type Manifest struct {
 	Version  string        `json:"version"`

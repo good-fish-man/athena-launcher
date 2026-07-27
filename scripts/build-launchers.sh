@@ -19,7 +19,7 @@ build() {
     cd "$ROOT"
     GOTOOLCHAIN=local CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
       -trimpath \
-      -ldflags "-s -w -X main.defaultManifestURL=$MANIFEST_URL" \
+      -ldflags "-s -w -X main.launcherVersion=$VERSION -X main.defaultManifestURL=$MANIFEST_URL" \
       -o "$output" .
   )
 }
