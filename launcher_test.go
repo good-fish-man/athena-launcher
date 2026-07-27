@@ -44,6 +44,22 @@ func TestManifestValidation(t *testing.T) {
 	}
 }
 
+func TestMacOSServicePathIncludesDesktopToolLocations(t *testing.T) {
+	got := macOSServicePath("/usr/bin:/bin:/opt/homebrew/bin")
+	want := "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin"
+	if got != want {
+		t.Fatalf("macOSServicePath() = %q, want %q", got, want)
+	}
+}
+
+func TestSetEnvironmentValueReplacesExistingValues(t *testing.T) {
+	got := setEnvironmentValue([]string{"HOME=/tmp", "PATH=/bin", "PATH=/usr/bin"}, "PATH", "/opt/homebrew/bin:/bin")
+	want := []string{"HOME=/tmp", "PATH=/opt/homebrew/bin:/bin"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("setEnvironmentValue() = %q, want %q", got, want)
+	}
+}
+
 func TestSafeArchivePath(t *testing.T) {
 	root := t.TempDir()
 	if _, err := safeArchivePath(root, "bin/agent-runtime"); err != nil {

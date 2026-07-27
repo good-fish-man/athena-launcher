@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -79,8 +80,11 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) error {
 	values := map[string]string{"{home}": s.home, "{config}": filepath.Dir(s.paths.clientConfig), "{install}": filepath.Dir(executable)}
 	args := expandValues(spec.Args, values)
 	env := append([]string{}, os.Environ()...)
+	if runtime.GOOS == "darwin" {
+		env = setEnvironmentValue(env, "PATH", macOSServicePath(os.Getenv("PATH")))
+	}
 	for key, value := range spec.Env {
-		env = append(env, key+"="+expandValue(value, values))
+		env = setEnvironmentValue(env, key, expandValue(value, values))
 	}
 	switch spec.Name {
 	case "agent-runtime":
@@ -122,6 +126,32 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) error {
 		fmt.Printf("[%s] healthy at %s\n", spec.Name, healthURL)
 	}
 	return nil
+}
+
+func macOSServicePath(current string) string {
+	paths := []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"}
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		seen[path] = true
+	}
+	for _, path := range filepath.SplitList(current) {
+		if path != "" && !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	return strings.Join(paths, string(os.PathListSeparator))
+}
+
+func setEnvironmentValue(env []string, key, value string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env)+1)
+	for _, item := range env {
+		if !strings.HasPrefix(item, prefix) {
+			result = append(result, item)
+		}
+	}
+	return append(result, prefix+value)
 }
 
 func (s *supervisor) StopAll() {
