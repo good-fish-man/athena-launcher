@@ -21,6 +21,8 @@ import (
 
 var downloadClient = &http.Client{Timeout: 30 * time.Minute}
 
+const databaseArtifactMarkerVersion = "2"
+
 func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 	data, err := readSource(ctx, source, 4<<20)
 	if err != nil {
@@ -96,17 +98,22 @@ func installDatabase(ctx context.Context, home string, manifest *Manifest) (stri
 	artifact := manifest.Database.Artifacts[platformKey()]
 	target := filepath.Join(home, "postgres", manifest.Database.Version)
 	marker := filepath.Join(target, ".artifact-sha256")
-	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
+	expectedMarker := databaseArtifactMarker(artifact.SHA256)
+	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), expectedMarker) {
 		return target, nil
 	}
 	fmt.Printf("[postgres] downloading %s for %s\n", manifest.Database.Version, platformKey())
 	if err := installArtifact(ctx, home, target, artifact); err != nil {
 		return "", fmt.Errorf("install postgres: %w", err)
 	}
-	if err := os.WriteFile(marker, []byte(strings.ToLower(artifact.SHA256)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(marker, []byte(expectedMarker+"\n"), 0o600); err != nil {
 		return "", err
 	}
 	return target, nil
+}
+
+func databaseArtifactMarker(checksum string) string {
+	return databaseArtifactMarkerVersion + ":" + strings.ToLower(strings.TrimSpace(checksum))
 }
 
 func installFrontend(ctx context.Context, home string, manifest *Manifest, state *launcherState) (string, error) {
@@ -310,10 +317,15 @@ func extractTarGZ(path, target string) error {
 	}
 	defer gzipReader.Close()
 	reader := tar.NewReader(gzipReader)
+	type archiveSymlink struct {
+		path   string
+		target string
+	}
+	var symlinks []archiveSymlink
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
-			return nil
+			break
 		}
 		if err != nil {
 			return err
@@ -331,8 +343,37 @@ func extractTarGZ(path, target string) error {
 			if err := writeArchiveFile(destination, reader, os.FileMode(header.Mode)); err != nil {
 				return err
 			}
+		case tar.TypeSymlink:
+			if err := validateArchiveSymlink(target, destination, header.Linkname); err != nil {
+				return err
+			}
+			symlinks = append(symlinks, archiveSymlink{path: destination, target: filepath.FromSlash(header.Linkname)})
 		}
 	}
+	// Create links only after regular files are written so later entries cannot
+	// traverse a link outside the extraction root.
+	for _, link := range symlinks {
+		if err := os.MkdirAll(filepath.Dir(link.path), 0o755); err != nil {
+			return err
+		}
+		if err := os.Symlink(link.target, link.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateArchiveSymlink(root, destination, linkname string) error {
+	linkTarget := filepath.Clean(filepath.FromSlash(linkname))
+	if filepath.IsAbs(linkTarget) {
+		return fmt.Errorf("unsafe archive symlink %q -> %q", destination, linkname)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(destination), linkTarget))
+	cleanRoot := filepath.Clean(root)
+	if resolved != cleanRoot && !strings.HasPrefix(resolved, cleanRoot+string(filepath.Separator)) {
+		return fmt.Errorf("archive symlink escapes target: %q -> %q", destination, linkname)
+	}
+	return nil
 }
 
 func safeArchivePath(root, name string) (string, error) {

@@ -73,6 +73,8 @@ func TestExtractTarGZAllowsRootDirectoryEntry(t *testing.T) {
 	}{
 		{header: &tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}},
 		{header: &tar.Header{Name: "./bin/postgres", Typeflag: tar.TypeReg, Mode: 0o755, Size: 8}, content: "postgres"},
+		{header: &tar.Header{Name: "./lib/libicu.68.2.dylib", Typeflag: tar.TypeReg, Mode: 0o755, Size: 3}, content: "icu"},
+		{header: &tar.Header{Name: "./lib/libicu.68.dylib", Typeflag: tar.TypeSymlink, Mode: 0o755, Linkname: "libicu.68.2.dylib"}},
 	}
 	for _, entry := range entries {
 		if err := tarWriter.WriteHeader(entry.header); err != nil {
@@ -104,6 +106,46 @@ func TestExtractTarGZAllowsRootDirectoryEntry(t *testing.T) {
 	}
 	if string(content) != "postgres" {
 		t.Fatalf("extracted content = %q", content)
+	}
+	link := filepath.Join(target, "lib", "libicu.68.dylib")
+	if linkTarget, err := os.Readlink(link); err != nil || linkTarget != "libicu.68.2.dylib" {
+		t.Fatalf("extracted symlink target = %q, err=%v", linkTarget, err)
+	}
+	linkedContent, err := os.ReadFile(link)
+	if err != nil || string(linkedContent) != "icu" {
+		t.Fatalf("read extracted symlink: content=%q err=%v", linkedContent, err)
+	}
+}
+
+func TestExtractTarGZRejectsEscapingSymlink(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "malicious.tar.gz")
+	archiveFile, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipWriter := gzip.NewWriter(archiveFile)
+	tarWriter := tar.NewWriter(gzipWriter)
+	header := &tar.Header{Name: "bin/escape", Typeflag: tar.TypeSymlink, Mode: 0o755, Linkname: "../../outside"}
+	if err := tarWriter.WriteHeader(header); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archiveFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractTarGZ(archivePath, t.TempDir()); err == nil {
+		t.Fatal("escaping archive symlink was accepted")
+	}
+}
+
+func TestDatabaseArtifactMarkerIsVersioned(t *testing.T) {
+	if got := databaseArtifactMarker("ABC123"); got != "2:abc123" {
+		t.Fatalf("databaseArtifactMarker() = %q", got)
 	}
 }
 
