@@ -56,6 +56,13 @@ func run(args []string) error {
 	case "install", "update":
 		_, _, _, err := prepare(context.Background(), opts)
 		return err
+	case "validate":
+		manifest, err := loadManifest(context.Background(), opts.manifestSource)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Manifest %s is valid for %s (%d services).\n", manifest.Version, platformKey(), len(manifest.Services))
+		return nil
 	case "stop":
 		return stopManaged(opts.home)
 	case "status":
@@ -90,6 +97,9 @@ func prepare(ctx context.Context, opts options) (*Manifest, *launcherState, map[
 	}
 	executables, err := installServices(ctx, opts.home, manifest, state)
 	if err != nil {
+		return nil, nil, nil, err
+	}
+	if _, err := installFrontend(ctx, opts.home, manifest, state); err != nil {
 		return nil, nil, nil, err
 	}
 	if _, err := writeGeneratedConfigs(opts.home, state, executables); err != nil {
@@ -141,7 +151,26 @@ func runForeground(opts options) error {
 	if err := supervisor.StartAll(ctx); err != nil {
 		return err
 	}
-	fmt.Printf("Athena is ready: http://127.0.0.1:%d\n", defaultClientHTTPPort)
+	frontendPath := ""
+	if manifest.Frontend != nil {
+		frontendPath = frontendRoot(filepath.Join(opts.home, "frontend", manifest.Version), manifest.Frontend.Root)
+	}
+	frontend, err := startFrontendServer(manifest, frontendPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		if err := frontend.Stop(stopCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "[frontend]", err)
+		}
+	}()
+	if frontend != nil {
+		fmt.Printf("Athena is ready: http://%s\n", frontend.address)
+	} else {
+		fmt.Printf("Athena API is ready: http://127.0.0.1:%d\n", defaultClientHTTPPort)
+	}
 	return supervisor.Run(ctx)
 }
 
@@ -215,6 +244,7 @@ func printStatus(home string) {
 	fmt.Printf("PostgreSQL: %s\n", statusLabel(tcpReachable(defaultDatabasePort)))
 	fmt.Printf("agent-runtime: %s\n", statusLabel(healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultRuntimeHTTPPort))))
 	fmt.Printf("agent-runtime-client: %s\n", statusLabel(healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort))))
+	fmt.Printf("Athena UI: %s\n", statusLabel(healthyURL(fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort))))
 }
 
 func watchStopRequest(ctx context.Context, cancel context.CancelFunc, path string) {
@@ -268,6 +298,7 @@ Usage:
   athena-launcher run     [--home PATH] [--manifest URL_OR_FILE]
   athena-launcher install [--home PATH] [--manifest URL_OR_FILE]
   athena-launcher update  [--home PATH] [--manifest URL_OR_FILE]
+  athena-launcher validate [--manifest URL_OR_FILE]
   athena-launcher stop    [--home PATH]
   athena-launcher status  [--home PATH]
   athena-launcher version

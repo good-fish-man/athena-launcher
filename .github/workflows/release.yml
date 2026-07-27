@@ -52,7 +52,8 @@ jobs:
           name="athena-launcher_${RELEASE_TAG}_${GOOS}_${GOARCH}$extension"
           mkdir -p dist
           version="${RELEASE_TAG#v}"
-          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version" -o "dist/$name" .
+          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/release-manifest.json"
+          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/$name" .
       - uses: actions/upload-artifact@v4
         with:
           name: athena-launcher-${{ matrix.goos }}-${{ matrix.goarch }}

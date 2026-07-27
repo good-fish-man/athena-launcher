@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,6 +30,11 @@ func TestManifestValidation(t *testing.T) {
 	if err := manifest.validate(); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
 	}
+	manifest.Database.Artifacts["test-missing-url"] = Artifact{SHA256: checksum, Format: "tar.gz"}
+	if err := manifest.validate(); err == nil {
+		t.Fatal("artifact without a URL was accepted")
+	}
+	delete(manifest.Database.Artifacts, "test-missing-url")
 	manifest.Services[0].Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/runtime", SHA256: "bad", Executable: "../runtime"}
 	if err := manifest.validate(); err == nil {
 		t.Fatal("unsafe manifest was accepted")
@@ -107,5 +114,34 @@ func TestPlainHTTPOnlyAllowedForLoopback(t *testing.T) {
 	local, _ := url.Parse("http://127.0.0.1:8080/file")
 	if err := validateDownloadURL(local); err != nil {
 		t.Fatalf("loopback URL rejected: %v", err)
+	}
+}
+
+func TestSPAHandler(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("athena app"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "assets", "app.js"), []byte("console.log('athena')"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for path, expected := range map[string]string{"/agents/123": "athena app", "/assets/app.js": "console.log('athena')"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		spaHandler(root).ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("GET %s returned %d: %s", path, response.Code, response.Body.String())
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/.artifact-sha256", nil)
+	response := httptest.NewRecorder()
+	spaHandler(root).ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("dotfile response status = %d", response.Code)
 	}
 }

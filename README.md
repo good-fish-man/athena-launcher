@@ -3,10 +3,11 @@
 Athena Launcher 是一个零第三方 Go 依赖的单文件安装器和服务管理器。最终用户只需下载与系统匹配的 `athena-launcher`，它会自动完成：
 
 - 识别 `darwin/linux/windows` 与 `amd64/arm64` 平台。
-- 下载并校验 PostgreSQL、`agent-runtime`、`agent-runtime-client` 的 SHA256。
+- 下载并校验 PostgreSQL、`agent-runtime`、`agent-runtime-client` 和 Athena UI 的 SHA256。
 - 在 `~/.athena` 初始化独立 PostgreSQL 数据目录，随机生成数据库密码并自动创建 `agent_runtime` 数据库。
 - 生成共享数据库、runtime、client 和 skills 配置。
 - 按 PostgreSQL、runtime、client 顺序启动并等待健康检查。
+- 下载并在 `http://127.0.0.1:3000` 托管 Athena 前端单页应用。
 - 监控业务进程，异常退出后自动重启；正常停止时按相反顺序关闭。
 - 再次执行时复用已校验的安装包和数据库，不会重复下载或覆盖用户数据。
 
@@ -52,6 +53,15 @@ TARGET_OS=linux TARGET_ARCH=amd64 VERSION=0.1.0 ./scripts/package-services.sh
 
 脚本会同时输出 SHA256，把地址和校验值写入 `release-manifest.json`。清单结构可参考 [release-manifest.example.json](release-manifest.example.json)。示例中的域名和 `REPLACE_WITH_64_CHAR_SHA256` 必须替换后才能使用。
 
+正式 Release 可在 GitHub Actions 中运行 `Publish Release Manifest`。该工作流会：
+
+1. 下载并校验 Maven Central 的 PostgreSQL 多平台精简包。
+2. 将 PostgreSQL 重新打包成 launcher 使用的标准目录。
+3. 下载同版本 runtime/client Release 资产并计算 SHA256。
+4. 下载同版本 Athena UI 静态资产并写入清单。
+5. 生成并发布 `release-manifest.json`、`SHA256SUMS` 和 PostgreSQL 平台包。
+6. 重新构建内置该 manifest URL 的 launcher。
+
 PostgreSQL 发布包需要由发布流水线准备为自包含压缩包，解压后根目录必须包含：
 
 ```text
@@ -66,15 +76,15 @@ Windows 文件带 `.exe`。若使用不同目录，可修改清单的 `database.
 
 ## 扩展服务
 
-清单中的 `services` 是通用的有序服务列表，不限于当前两个后端。后续要托管 frontend 或其他本地服务，只需添加平台产物、启动参数、环境变量和健康检查：
+清单中的 `services` 是通用的有序服务列表，不限于当前两个后端。后续要托管其他本地服务，只需添加平台产物、启动参数、环境变量和健康检查：
 
 ```json
 {
-  "name": "frontend",
+  "name": "local-worker",
   "order": 30,
-  "args": ["--config", "{config}/frontend.yaml"],
+  "args": ["--config", "{config}/worker.yaml"],
   "env": { "ATHENA_HOME": "{home}" },
-  "health_url": "http://127.0.0.1:3000/healthz",
+  "health_url": "http://127.0.0.1:19000/healthz",
   "artifacts": {}
 }
 ```

@@ -20,11 +20,12 @@ const (
 	defaultRuntimeGRPCPort = 18080
 	defaultRuntimeHTTPPort = 18081
 	defaultClientHTTPPort  = 8090
+	defaultFrontendPort    = 3000
 )
 
 // Release metadata can be injected at build time with -ldflags.
 var (
-	launcherVersion     = "0.1.0"
+	launcherVersion    = "0.1.0"
 	defaultManifestURL string
 )
 
@@ -32,6 +33,13 @@ type Manifest struct {
 	Version  string        `json:"version"`
 	Database DatabaseSpec  `json:"database"`
 	Services []ServiceSpec `json:"services"`
+	Frontend *FrontendSpec `json:"frontend,omitempty"`
+}
+
+type FrontendSpec struct {
+	ListenAddr string              `json:"listen_addr,omitempty"`
+	Root       string              `json:"root,omitempty"`
+	Artifacts  map[string]Artifact `json:"artifacts"`
 }
 
 type DatabaseSpec struct {
@@ -121,6 +129,11 @@ func (m *Manifest) validate() error {
 	if err := validateArtifact(databaseArtifact, false); err != nil {
 		return fmt.Errorf("database artifact for %s: %w", key, err)
 	}
+	for platform, artifact := range m.Database.Artifacts {
+		if err := validateArtifact(artifact, false); err != nil {
+			return fmt.Errorf("database artifact for %s: %w", platform, err)
+		}
+	}
 	if err := validateRelativePath(m.Database.BinDir, true); err != nil {
 		return fmt.Errorf("database bin_dir: %w", err)
 	}
@@ -143,12 +156,37 @@ func (m *Manifest) validate() error {
 		if err := validateArtifact(artifact, true); err != nil {
 			return fmt.Errorf("service %s artifact for %s: %w", service.Name, key, err)
 		}
+		for platform, candidate := range service.Artifacts {
+			if err := validateArtifact(candidate, true); err != nil {
+				return fmt.Errorf("service %s artifact for %s: %w", service.Name, platform, err)
+			}
+		}
+	}
+	if m.Frontend != nil {
+		artifact, ok := m.Frontend.Artifacts[key]
+		if !ok {
+			return fmt.Errorf("frontend does not provide an artifact for %s", key)
+		}
+		if err := validateArtifact(artifact, false); err != nil {
+			return fmt.Errorf("frontend artifact for %s: %w", key, err)
+		}
+		for platform, candidate := range m.Frontend.Artifacts {
+			if err := validateArtifact(candidate, false); err != nil {
+				return fmt.Errorf("frontend artifact for %s: %w", platform, err)
+			}
+		}
+		if err := validateRelativePath(m.Frontend.Root, true); err != nil {
+			return fmt.Errorf("frontend root: %w", err)
+		}
 	}
 	sort.SliceStable(m.Services, func(i, j int) bool { return m.Services[i].Order < m.Services[j].Order })
 	return nil
 }
 
 func validateArtifact(artifact Artifact, executableRequired bool) error {
+	if strings.TrimSpace(artifact.URL) == "" {
+		return fmt.Errorf("url is required")
+	}
 	checksum := strings.TrimSpace(artifact.SHA256)
 	decoded, err := hex.DecodeString(checksum)
 	if err != nil || len(decoded) != sha256Size {

@@ -1,0 +1,94 @@
+name: Publish Release Manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Athena release tag
+        required: true
+        default: v0.1.0
+      postgres_version:
+        description: PostgreSQL binary version
+        required: true
+        default: 16.13.0
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  POSTGRES_VERSION: ${{ inputs.postgres_version }}
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - darwin-arm64
+          - darwin-amd64
+          - linux-arm64
+          - linux-amd64
+          - windows-amd64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package PostgreSQL
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          OUTPUT_DIR: dist/postgres
+        run: ./scripts/package-postgres.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: postgres-${{ matrix.platform }}
+          path: dist/postgres/*
+          if-no-files-found: error
+
+  manifest:
+    needs: postgres
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: postgres-*
+          path: release-assets
+          merge-multiple: true
+      - name: Download service release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo good-fish-man/agent-runtime --pattern "agent-runtime_${RELEASE_TAG}_*" --dir release-assets
+          gh release download "$RELEASE_TAG" --repo good-fish-man/agent-runtime-client --pattern "agent-runtime-client_${RELEASE_TAG}_*" --dir release-assets
+          gh release download "$RELEASE_TAG" --repo good-fish-man/athena-agent-ui --pattern "athena-agent-ui_${RELEASE_TAG}.tar.gz" --dir release-assets
+      - name: Generate signed-by-checksum manifest
+        env:
+          ASSET_DIR: release-assets
+          OUTPUT: release-manifest.json
+          TAG: ${{ inputs.tag }}
+        run: |
+          ./scripts/generate-release-manifest.sh
+          jq empty release-manifest.json
+          go run . validate --manifest release-manifest.json
+          sha256sum release-assets/postgres_* release-manifest.json > SHA256SUMS
+      - name: Publish manifest and PostgreSQL assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" release-assets/postgres_* release-manifest.json SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: |
+            release-manifest.json
+            SHA256SUMS
+      - name: Rebuild launchers with embedded manifest URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$RELEASE_TAG"

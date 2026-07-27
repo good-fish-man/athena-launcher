@@ -109,6 +109,37 @@ func installDatabase(ctx context.Context, home string, manifest *Manifest) (stri
 	return target, nil
 }
 
+func installFrontend(ctx context.Context, home string, manifest *Manifest, state *launcherState) (string, error) {
+	if manifest.Frontend == nil {
+		return "", nil
+	}
+	artifact := manifest.Frontend.Artifacts[platformKey()]
+	target := filepath.Join(home, "frontend", manifest.Version)
+	marker := filepath.Join(target, ".artifact-sha256")
+	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
+		return frontendRoot(target, manifest.Frontend.Root), nil
+	}
+	fmt.Printf("[frontend] downloading %s for %s\n", manifest.Version, platformKey())
+	if err := installArtifact(ctx, home, target, artifact); err != nil {
+		return "", fmt.Errorf("install frontend: %w", err)
+	}
+	if err := os.WriteFile(marker, []byte(strings.ToLower(artifact.SHA256)+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	state.Installed["frontend"] = manifest.Version
+	if err := saveState(home, state); err != nil {
+		return "", err
+	}
+	return frontendRoot(target, manifest.Frontend.Root), nil
+}
+
+func frontendRoot(target, root string) string {
+	if strings.TrimSpace(root) == "" {
+		return target
+	}
+	return filepath.Join(target, filepath.FromSlash(root))
+}
+
 func installArtifact(ctx context.Context, home, target string, artifact Artifact) error {
 	if err := os.MkdirAll(filepath.Join(home, "downloads"), 0o700); err != nil {
 		return err
