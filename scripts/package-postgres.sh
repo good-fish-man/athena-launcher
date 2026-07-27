@@ -69,6 +69,7 @@ fi
 
 postgres_root=$(dirname "$(dirname "$initdb")")
 cp -R "$postgres_root/." "$work/package/"
+./scripts/fix-postgres-library-links.sh "$work/package" "$PLATFORM"
 for binary in initdb pg_ctl postgres; do
   if [ ! -f "$work/package/bin/$binary$suffix" ]; then
     echo "PostgreSQL package is missing bin/$binary$suffix" >&2
