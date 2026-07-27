@@ -55,12 +55,15 @@ TARGET_OS=linux TARGET_ARCH=amd64 VERSION=0.1.0 ./scripts/package-services.sh
 
 正式 Release 可在 GitHub Actions 中运行 `Publish Release Manifest`。该工作流会：
 
-1. 下载并校验 Maven Central 的 PostgreSQL 多平台精简包。
-2. 将 PostgreSQL 重新打包成 launcher 使用的标准目录。
-3. 下载同版本 runtime/client Release 资产并计算 SHA256。
-4. 下载同版本 Athena UI 静态资产并写入清单。
-5. 生成并发布 `release-manifest.json`、`SHA256SUMS` 和 PostgreSQL 平台包。
-6. 重新构建内置该 manifest URL 的 launcher。
+1. 检查 runtime、client 和 Athena UI 是否已发布同名 GitHub Release。
+2. 下载并校验 Maven Central 的 PostgreSQL 多平台精简包。
+3. 将 PostgreSQL 重新打包成 launcher 使用的标准目录。
+4. 下载同版本 runtime/client Release 资产并计算 SHA256。
+5. 下载同版本 Athena UI 静态资产并写入清单。
+6. 生成并发布 `release-manifest.json`、`SHA256SUMS` 和 PostgreSQL 平台包。
+7. 重新构建内置该 manifest URL 的 launcher。
+
+首次发布新 tag 时，应先在三个服务仓库运行各自的 `Release` 工作流，全部成功后再运行 launcher 的 `Publish Release Manifest`。GitHub 仓库之间的默认令牌相互隔离，因此 launcher 不会代替其他仓库创建 Release。
 
 PostgreSQL 发布包需要由发布流水线准备为自包含压缩包，解压后根目录必须包含：
 

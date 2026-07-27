@@ -21,7 +21,29 @@ env:
   POSTGRES_VERSION: ${{ inputs.postgres_version }}
 
 jobs:
+  prerequisites:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify service releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for repo in agent-runtime agent-runtime-client athena-agent-ui; do
+            if ! gh release view "$RELEASE_TAG" --repo "good-fish-man/$repo" >/dev/null 2>&1; then
+              echo "::error title=Missing service release::good-fish-man/$repo has no GitHub Release named $RELEASE_TAG"
+              echo "Create it with: gh workflow run release.yml -R good-fish-man/$repo --ref main -f tag=$RELEASE_TAG"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Wait for all three Release workflows to finish, then rerun Publish Release Manifest."
+            exit 1
+          fi
+
   postgres:
+    needs: prerequisites
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
