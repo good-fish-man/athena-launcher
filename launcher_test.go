@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -47,10 +49,61 @@ func TestSafeArchivePath(t *testing.T) {
 	if _, err := safeArchivePath(root, "bin/agent-runtime"); err != nil {
 		t.Fatalf("safe path rejected: %v", err)
 	}
+	if got, err := safeArchivePath(root, "./"); err != nil || got != root {
+		t.Fatalf("archive root rejected: path=%q err=%v", got, err)
+	}
 	for _, value := range []string{"../escape", "bin/../../escape", "/absolute/path"} {
 		if _, err := safeArchivePath(root, value); err == nil {
 			t.Fatalf("unsafe path %q was accepted", value)
 		}
+	}
+}
+
+func TestExtractTarGZAllowsRootDirectoryEntry(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "postgres.tar.gz")
+	archiveFile, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipWriter := gzip.NewWriter(archiveFile)
+	tarWriter := tar.NewWriter(gzipWriter)
+	entries := []struct {
+		header  *tar.Header
+		content string
+	}{
+		{header: &tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}},
+		{header: &tar.Header{Name: "./bin/postgres", Typeflag: tar.TypeReg, Mode: 0o755, Size: 8}, content: "postgres"},
+	}
+	for _, entry := range entries {
+		if err := tarWriter.WriteHeader(entry.header); err != nil {
+			t.Fatal(err)
+		}
+		if entry.content != "" {
+			if _, err := tarWriter.Write([]byte(entry.content)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archiveFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	target := t.TempDir()
+	if err := extractTarGZ(archivePath, target); err != nil {
+		t.Fatalf("extract archive with root entry: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(target, "bin", "postgres"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "postgres" {
+		t.Fatalf("extracted content = %q", content)
 	}
 }
 
