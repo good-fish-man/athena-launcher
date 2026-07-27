@@ -18,7 +18,15 @@ chmod 755 "$contents/MacOS/athena-launcher"
 cat > "$contents/MacOS/Athena" <<'EOF'
 #!/bin/sh
 base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$base/athena-launcher" launch
+error_log=$(mktemp -t athena-launcher)
+if "$base/athena-launcher" launch 2>"$error_log"; then
+  rm -f "$error_log"
+  exit 0
+fi
+message=$(cat "$error_log")
+rm -f "$error_log"
+/usr/bin/osascript -e 'on run argv' -e 'display alert "Athena could not start" message (item 1 of argv) as critical' -e 'end run' "$message\n\nLogs: ~/.athena/logs/launcher.log"
+exit 1
 EOF
 chmod 755 "$contents/MacOS/Athena"
 

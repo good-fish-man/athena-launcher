@@ -19,7 +19,19 @@ cp packaging/athena.svg "$appdir/usr/share/icons/hicolor/scalable/apps/athena.sv
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$base/usr/bin/athena-launcher" launch
+error_log=$(mktemp)
+if "$base/usr/bin/athena-launcher" launch 2>"$error_log"; then
+  rm -f "$error_log"
+  exit 0
+fi
+message=$(cat "$error_log")
+rm -f "$error_log"
+if command -v zenity >/dev/null 2>&1; then
+  zenity --error --title="Athena could not start" --text="$message\n\nLogs: ~/.athena/logs/launcher.log"
+else
+  printf '%s\n' "$message" >&2
+fi
+exit 1
 EOF
 chmod 755 "$appdir/AppRun"
 
