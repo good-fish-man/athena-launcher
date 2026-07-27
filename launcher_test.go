@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -103,6 +104,34 @@ func TestGeneratedConfigsUseManagedDatabase(t *testing.T) {
 	}
 	if string(skills) != "skills: {}\n" {
 		t.Fatalf("unexpected skills config: %q", skills)
+	}
+}
+
+func TestManagedDatabaseRequiresOnlyEmbeddedServerBinaries(t *testing.T) {
+	installDir := t.TempDir()
+	binDir := filepath.Join(installDir, "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	suffix := ""
+	if runtime.GOOS == "windows" {
+		suffix = ".exe"
+	}
+	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
+		if err := os.WriteFile(filepath.Join(binDir, name+suffix), nil, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	database := newManagedDatabase(t.TempDir(), installDir, "bin", "secret")
+	if err := database.validateBinaries(); err != nil {
+		t.Fatalf("minimal embedded PostgreSQL package rejected: %v", err)
+	}
+}
+
+func TestQuoteIdentifier(t *testing.T) {
+	if got := quoteIdentifier(`agent"runtime`); got != `"agent""runtime"` {
+		t.Fatalf("quoteIdentifier() = %q", got)
 	}
 }
 

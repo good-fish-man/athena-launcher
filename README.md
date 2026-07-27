@@ -67,9 +67,7 @@ PostgreSQL 发布包需要由发布流水线准备为自包含压缩包，解压
 ```text
 bin/initdb
 bin/pg_ctl
-bin/pg_isready
-bin/psql
-bin/createdb
+bin/postgres
 ```
 
 Windows 文件带 `.exe`。若使用不同目录，可修改清单的 `database.bin_dir`。公网下载地址必须使用 HTTPS，本地开发地址允许 `localhost` HTTP 或绝对文件路径。
