@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -84,11 +85,12 @@ func run(args []string) error {
 func launchDesktop(opts options) error {
 	frontendAddress := fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort)
 	startupAddress := fmt.Sprintf("http://127.0.0.1:%d/", defaultStartupPort)
+	if startupCenterHealthy() {
+		requestStartupUpdateCheck()
+		return openBrowser(startupAddress)
+	}
 	if healthyURL(frontendAddress) {
 		return openBrowser(frontendAddress)
-	}
-	if startupCenterHealthy() {
-		return openBrowser(startupAddress)
 	}
 	if err := startDetached(opts); err != nil {
 		return err
@@ -113,10 +115,10 @@ func launchDesktop(opts options) error {
 }
 
 func prepare(ctx context.Context, opts options) (*Manifest, *launcherState, map[string]string, error) {
-	return prepareWithTracker(ctx, opts, nil)
+	return prepareWithTracker(ctx, opts, nil, nil, true)
 }
 
-func prepareWithTracker(ctx context.Context, opts options, tracker *startupTracker) (*Manifest, *launcherState, map[string]string, error) {
+func prepareWithTracker(ctx context.Context, opts options, tracker *startupTracker, control *startupController, updateApproved bool) (*Manifest, *launcherState, map[string]string, error) {
 	if err := os.MkdirAll(opts.home, 0o700); err != nil {
 		return nil, nil, nil, err
 	}
@@ -133,6 +135,15 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 		return nil, nil, nil, err
 	}
 	tracker.complete("manifest", fmt.Sprintf("Release %s verified for %s", manifest.Version, platformKey()))
+	if updates := checkPackageUpdates(opts.home, manifest); len(updates) > 0 && control != nil && !updateApproved {
+		tracker.offerUpdate(updates, false)
+		select {
+		case <-ctx.Done():
+			return nil, nil, nil, ctx.Err()
+		case <-control.applyUpdate:
+			tracker.applyingUpdate()
+		}
+	}
 
 	tracker.begin("database-package", "Checking the managed PostgreSQL package")
 	if _, err := installDatabase(ctx, opts.home, manifest); err != nil {
@@ -162,6 +173,10 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 		return nil, nil, nil, err
 	}
 	tracker.complete("configuration", "Local service configuration is ready")
+	if err := saveInstalledManifest(opts.home, manifest); err != nil {
+		tracker.fail("configuration", err)
+		return nil, nil, nil, err
+	}
 	return manifest, state, executables, nil
 }
 
@@ -172,7 +187,8 @@ func runForeground(opts options) error {
 	_ = os.Remove(stopPath)
 	go watchStopRequest(ctx, cancel, stopPath)
 	tracker := newStartupTracker(opts.home)
-	statusServer, err := startStartupServer(tracker)
+	control := newStartupController()
+	statusServer, err := startStartupServer(tracker, control)
 	if err != nil {
 		return err
 	}
@@ -182,10 +198,17 @@ func runForeground(opts options) error {
 		_ = statusServer.Stop(stopCtx)
 	}()
 
+	updateApproved := false
 	for {
-		err = runManaged(ctx, opts, tracker)
+		err = runManaged(ctx, opts, tracker, control, updateApproved)
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, errUpdateRequested) {
+			updateApproved = true
+			tracker.reset()
+			tracker.applyingUpdate()
+			continue
 		}
 		if tracker.current().State != "error" {
 			tracker.fail("", err)
@@ -203,8 +226,8 @@ func runForeground(opts options) error {
 	}
 }
 
-func runManaged(ctx context.Context, opts options, tracker *startupTracker) error {
-	manifest, state, executables, err := prepareWithTracker(ctx, opts, tracker)
+func runManaged(ctx context.Context, opts options, tracker *startupTracker, control *startupController, updateApproved bool) error {
+	manifest, state, executables, err := prepareWithTracker(ctx, opts, tracker, control, updateApproved)
 	if err != nil {
 		return err
 	}
@@ -217,7 +240,11 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker) erro
 		_ = saveState(opts.home, state)
 	}()
 
-	databaseDir := filepath.Join(opts.home, "postgres", manifest.Database.Version)
+	databaseDir, err := installDatabase(ctx, opts.home, manifest)
+	if err != nil {
+		tracker.fail("database", err)
+		return err
+	}
 	database := newManagedDatabase(opts.home, databaseDir, manifest.Database.BinDir, state.DBPassword)
 	fmt.Println("[postgres] preparing managed database")
 	tracker.begin("database", "Starting the managed PostgreSQL database")
@@ -243,9 +270,14 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker) erro
 	if err := supervisor.StartAll(ctx); err != nil {
 		return err
 	}
+	defer supervisor.StopAll()
 	frontendPath := ""
 	if manifest.Frontend != nil {
-		frontendPath = frontendRoot(filepath.Join(opts.home, "frontend", manifest.Version), manifest.Frontend.Root)
+		frontendVersion := state.Installed["frontend"]
+		if frontendVersion == "" {
+			frontendVersion = manifest.Version
+		}
+		frontendPath = frontendRoot(filepath.Join(opts.home, "frontend", frontendVersion), manifest.Frontend.Root)
 	}
 	tracker.begin("frontend", "Starting the Athena interface")
 	frontend, err := startFrontendServer(manifest, frontendPath)
@@ -260,6 +292,7 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker) erro
 	} else {
 		tracker.complete("frontend", "API-only mode is ready")
 	}
+	tracker.clearUpdate("All installed packages are current")
 	tracker.ready(frontendURL)
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -273,16 +306,23 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker) erro
 	} else {
 		fmt.Printf("Athena API is ready: http://127.0.0.1:%d\n", defaultClientHTTPPort)
 	}
-	return supervisor.Run(ctx)
+	return supervisor.Run(ctx, control, func() ([]packageUpdate, error) {
+		remote, err := loadManifest(ctx, opts.manifestSource)
+		if err != nil {
+			return nil, err
+		}
+		return checkPackageUpdates(opts.home, remote), nil
+	})
 }
 
 func startDetached(opts options) error {
-	if healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort)) {
-		fmt.Printf("Athena is already running: http://127.0.0.1:%d\n", defaultClientHTTPPort)
+	if startupCenterHealthy() {
+		requestStartupUpdateCheck()
+		fmt.Printf("Athena is already running; checking updates at http://127.0.0.1:%d\n", defaultStartupPort)
 		return nil
 	}
-	if startupCenterHealthy() {
-		fmt.Printf("Athena is already starting: http://127.0.0.1:%d\n", defaultStartupPort)
+	if healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort)) {
+		fmt.Printf("Athena is already running: http://127.0.0.1:%d\n", defaultClientHTTPPort)
 		return nil
 	}
 	executable, err := os.Executable()
@@ -390,6 +430,19 @@ func startupCenterHealthy() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusNoContent
+}
+
+func requestStartupUpdateCheck() {
+	client := &http.Client{Timeout: 2 * time.Second}
+	address := fmt.Sprintf("http://127.0.0.1:%d/api/update/check", defaultStartupPort)
+	request, err := http.NewRequest(http.MethodPost, address, nil)
+	if err != nil {
+		return
+	}
+	resp, err := client.Do(request)
+	if err == nil {
+		_ = resp.Body.Close()
+	}
 }
 
 func tcpReachable(port uint32) bool {

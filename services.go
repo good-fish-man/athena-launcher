@@ -49,13 +49,33 @@ func (s *supervisor) StartAll(ctx context.Context) error {
 	return nil
 }
 
-func (s *supervisor) Run(ctx context.Context) error {
+func (s *supervisor) Run(ctx context.Context, control *startupController, checkUpdates func() ([]packageUpdate, error)) error {
 	for {
 		select {
 		case <-ctx.Done():
 			s.stopping = true
 			s.StopAll()
 			return nil
+		case <-control.checkUpdate:
+			s.tracker.checkingForUpdates()
+			updates, err := checkUpdates()
+			if err != nil {
+				s.tracker.updateError(err)
+				continue
+			}
+			if len(updates) == 0 {
+				s.tracker.clearUpdate("All installed packages are current")
+				continue
+			}
+			s.tracker.offerUpdate(updates, true)
+		case <-control.dismissUpdate:
+			s.tracker.clearUpdate("Update postponed")
+		case <-control.applyUpdate:
+			if s.tracker.current().Update.State != "available" && s.tracker.current().Update.State != "applying" {
+				continue
+			}
+			s.tracker.applyingUpdate()
+			return errUpdateRequested
 		case event := <-s.exits:
 			if s.stopping {
 				continue

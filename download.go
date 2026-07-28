@@ -68,12 +68,22 @@ func installServices(ctx context.Context, home string, manifest *Manifest, state
 	installed := make(map[string]string, len(manifest.Services))
 	for _, service := range manifest.Services {
 		artifact := service.Artifacts[platformKey()]
-		target := filepath.Join(home, "services", service.Name, manifest.Version)
+		serviceRoot := filepath.Join(home, "services", service.Name)
+		target := filepath.Join(serviceRoot, manifest.Version)
 		executable := filepath.Join(target, filepath.FromSlash(artifact.Executable))
 		marker := filepath.Join(target, ".artifact-sha256")
 		if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
 			if _, err := os.Stat(executable); err == nil {
 				installed[service.Name] = executable
+				continue
+			}
+		}
+		if existing := findArtifactRootByMarker(serviceRoot, artifact.SHA256); existing != "" {
+			existingExecutable, err := findInstalledExecutable(existing, filepath.Base(filepath.FromSlash(artifact.Executable)))
+			if err == nil {
+				installed[service.Name] = existingExecutable
+				state.Installed[service.Name] = filepath.Base(existing)
+				fmt.Printf("[%s] reusing verified package %s\n", service.Name, shortHash(artifact.SHA256))
 				continue
 			}
 		}
@@ -96,11 +106,16 @@ func installServices(ctx context.Context, home string, manifest *Manifest, state
 
 func installDatabase(ctx context.Context, home string, manifest *Manifest) (string, error) {
 	artifact := manifest.Database.Artifacts[platformKey()]
-	target := filepath.Join(home, "postgres", manifest.Database.Version)
+	databaseRoot := filepath.Join(home, "postgres")
+	target := filepath.Join(databaseRoot, manifest.Database.Version)
 	marker := filepath.Join(target, ".artifact-sha256")
 	expectedMarker := databaseArtifactMarker(artifact.SHA256)
 	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), expectedMarker) {
 		return target, nil
+	}
+	if existing := findArtifactRootByMarker(databaseRoot, expectedMarker); existing != "" {
+		fmt.Printf("[postgres] reusing verified package %s\n", shortHash(artifact.SHA256))
+		return existing, nil
 	}
 	fmt.Printf("[postgres] downloading %s for %s\n", manifest.Database.Version, platformKey())
 	if err := installArtifact(ctx, home, target, artifact); err != nil {
@@ -121,10 +136,16 @@ func installFrontend(ctx context.Context, home string, manifest *Manifest, state
 		return "", nil
 	}
 	artifact := manifest.Frontend.Artifacts[platformKey()]
-	target := filepath.Join(home, "frontend", manifest.Version)
+	frontendRootDir := filepath.Join(home, "frontend")
+	target := filepath.Join(frontendRootDir, manifest.Version)
 	marker := filepath.Join(target, ".artifact-sha256")
 	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
 		return frontendRoot(target, manifest.Frontend.Root), nil
+	}
+	if existing := findArtifactRootByMarker(frontendRootDir, artifact.SHA256); existing != "" {
+		state.Installed["frontend"] = filepath.Base(existing)
+		fmt.Printf("[frontend] reusing verified package %s\n", shortHash(artifact.SHA256))
+		return frontendRoot(existing, manifest.Frontend.Root), nil
 	}
 	fmt.Printf("[frontend] downloading %s for %s\n", manifest.Version, platformKey())
 	if err := installArtifact(ctx, home, target, artifact); err != nil {
@@ -138,6 +159,39 @@ func installFrontend(ctx context.Context, home string, manifest *Manifest, state
 		return "", err
 	}
 	return frontendRoot(target, manifest.Frontend.Root), nil
+}
+
+func findArtifactRootByMarker(root, expected string) string {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	markers, _ := filepath.Glob(filepath.Join(root, "*", ".artifact-sha256"))
+	for _, marker := range markers {
+		data, err := os.ReadFile(marker)
+		if err == nil && strings.ToLower(strings.TrimSpace(string(data))) == expected {
+			return filepath.Dir(marker)
+		}
+	}
+	return ""
+}
+
+func findInstalledExecutable(root, name string) (string, error) {
+	var executable string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || entry.Name() != name {
+			return nil
+		}
+		executable = path
+		return filepath.SkipAll
+	})
+	if err != nil {
+		return "", err
+	}
+	if executable == "" {
+		return "", os.ErrNotExist
+	}
+	return executable, nil
 }
 
 func frontendRoot(target, root string) string {

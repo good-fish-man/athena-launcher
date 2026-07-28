@@ -49,7 +49,8 @@ func TestStartupHandlerExposesStatusAndKnownLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	retry := make(chan struct{}, 1)
-	handler := startupHandler(newStartupTracker(home), retry)
+	control := newStartupController()
+	handler := startupHandler(newStartupTracker(home), retry, control)
 
 	statusResponse := httptest.NewRecorder()
 	handler.ServeHTTP(statusResponse, httptest.NewRequest(http.MethodGet, "/api/status", nil))
@@ -79,10 +80,27 @@ func TestStartupHandlerExposesStatusAndKnownLogs(t *testing.T) {
 	default:
 		t.Fatal("retry signal was not delivered")
 	}
+
+	updateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(updateResponse, httptest.NewRequest(http.MethodPost, "/api/update/check", nil))
+	if updateResponse.Code != http.StatusAccepted {
+		t.Fatalf("update check response = %d", updateResponse.Code)
+	}
+	select {
+	case <-control.checkUpdate:
+	default:
+		t.Fatal("update check signal was not delivered")
+	}
+
+	applyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(applyResponse, httptest.NewRequest(http.MethodPost, "/api/update/apply", nil))
+	if applyResponse.Code != http.StatusConflict {
+		t.Fatalf("update apply without offer response = %d", applyResponse.Code)
+	}
 }
 
 func TestStartupPageContainsLiveStatusUI(t *testing.T) {
-	for _, expected := range []string{"Startup Center", "/api/status", "/api/log?source=", "Open Athena"} {
+	for _, expected := range []string{"Startup Center", "/api/status", "/api/log?source=", "/api/update/apply", "Update and restart", "Open Athena"} {
 		if !strings.Contains(startupPageHTML, expected) {
 			t.Fatalf("startup page is missing %q", expected)
 		}

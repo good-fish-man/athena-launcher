@@ -34,6 +34,28 @@ type startupSnapshot struct {
 	LogPath     string        `json:"logPath"`
 	UpdatedAt   string        `json:"updatedAt"`
 	Steps       []startupStep `json:"steps"`
+	Update      startupUpdate `json:"update"`
+}
+
+type startupUpdate struct {
+	State      string          `json:"state"`
+	Message    string          `json:"message,omitempty"`
+	CanDefer   bool            `json:"canDefer"`
+	Components []packageUpdate `json:"components,omitempty"`
+}
+
+type startupController struct {
+	checkUpdate   chan struct{}
+	applyUpdate   chan struct{}
+	dismissUpdate chan struct{}
+}
+
+func newStartupController() *startupController {
+	return &startupController{
+		checkUpdate:   make(chan struct{}, 1),
+		applyUpdate:   make(chan struct{}, 1),
+		dismissUpdate: make(chan struct{}, 1),
+	}
 }
 
 type startupTracker struct {
@@ -55,6 +77,7 @@ func (t *startupTracker) reset() {
 		Message: "Preparing Athena",
 		Version: launcherVersion,
 		LogPath: filepath.Join(t.home, "logs", "launcher.log"),
+		Update:  startupUpdate{State: "idle"},
 		Steps: []startupStep{
 			{ID: "manifest", Label: "Release manifest", Status: "pending"},
 			{ID: "database-package", Label: "PostgreSQL package", Status: "pending"},
@@ -67,6 +90,63 @@ func (t *startupTracker) reset() {
 			{ID: "frontend", Label: "Athena UI", Status: "pending"},
 		},
 	}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) checkingForUpdates() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update = startupUpdate{State: "checking", Message: "Checking remote package hashes"}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) offerUpdate(updates []packageUpdate, canDefer bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update = startupUpdate{State: "available", Message: fmt.Sprintf("%d package updates are available", len(updates)), CanDefer: canDefer, Components: append([]packageUpdate(nil), updates...)}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) applyingUpdate() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update.State = "applying"
+	t.snapshot.Update.Message = "Stopping current services and applying updates"
+	t.snapshot.Update.CanDefer = false
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) clearUpdate(message string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update = startupUpdate{State: "none", Message: message}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) updateError(err error) {
+	if t == nil || err == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update = startupUpdate{State: "error", Message: err.Error(), CanDefer: true}
 	t.touchLocked()
 	t.mu.Unlock()
 	t.persist()
@@ -181,25 +261,26 @@ type startupServer struct {
 	server  *http.Server
 	address string
 	retry   chan struct{}
+	control *startupController
 }
 
-func startStartupServer(tracker *startupTracker) (*startupServer, error) {
+func startStartupServer(tracker *startupTracker, control *startupController) (*startupServer, error) {
 	address := fmt.Sprintf("127.0.0.1:%d", defaultStartupPort)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("startup center listen %s: %w", address, err)
 	}
 	retry := make(chan struct{}, 1)
-	server := &http.Server{Addr: address, Handler: startupHandler(tracker, retry), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: address, Handler: startupHandler(tracker, retry, control), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "[startup-center]", err)
 		}
 	}()
-	return &startupServer{server: server, address: address, retry: retry}, nil
+	return &startupServer{server: server, address: address, retry: retry, control: control}, nil
 }
 
-func startupHandler(tracker *startupTracker, retry chan<- struct{}) http.Handler {
+func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *startupController) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)
@@ -239,6 +320,34 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}) http.Handler
 		}
 		response.WriteHeader(http.StatusAccepted)
 	})
+	mux.HandleFunc("/api/update/check", func(response http.ResponseWriter, request *http.Request) {
+		if !acceptStartupAction(response, request, control != nil) {
+			return
+		}
+		tracker.checkingForUpdates()
+		signalStartupAction(control.checkUpdate)
+		response.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("/api/update/apply", func(response http.ResponseWriter, request *http.Request) {
+		if !acceptStartupAction(response, request, control != nil) {
+			return
+		}
+		if tracker.current().Update.State != "available" {
+			http.Error(response, "no package update is awaiting approval", http.StatusConflict)
+			return
+		}
+		tracker.applyingUpdate()
+		signalStartupAction(control.applyUpdate)
+		response.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("/api/update/dismiss", func(response http.ResponseWriter, request *http.Request) {
+		if !acceptStartupAction(response, request, control != nil) {
+			return
+		}
+		tracker.clearUpdate("Update postponed")
+		signalStartupAction(control.dismissUpdate)
+		response.WriteHeader(http.StatusAccepted)
+	})
 	mux.HandleFunc("/", func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/" {
 			http.NotFound(response, request)
@@ -250,6 +359,26 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}) http.Handler
 		_, _ = response.Write([]byte(startupPageHTML))
 	})
 	return mux
+}
+
+func acceptStartupAction(response http.ResponseWriter, request *http.Request, available bool) bool {
+	if request.Method != http.MethodPost {
+		response.Header().Set("Allow", http.MethodPost)
+		http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	if !available {
+		http.Error(response, "action is unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+func signalStartupAction(channel chan<- struct{}) {
+	select {
+	case channel <- struct{}{}:
+	default:
+	}
 }
 
 func (s *startupServer) Stop(ctx context.Context) error {
