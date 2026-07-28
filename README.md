@@ -1,117 +1,224 @@
 # Athena Launcher
 
-Athena Launcher 是一个零第三方 Go 依赖的单文件安装器和服务管理器。最终用户只需下载与系统匹配的 `athena-launcher`，它会自动完成：
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-- 识别 `darwin/linux/windows` 与 `amd64/arm64` 平台。
-- 下载并校验 PostgreSQL、`agent-runtime`、`agent-runtime-client` 和 Athena UI 的 SHA256。
-- 在 `~/.athena` 初始化独立 PostgreSQL 数据目录，随机生成数据库密码并自动创建 `agent_runtime` 数据库。
-- 生成共享数据库、runtime、client 和 skills 配置。
-- 按 PostgreSQL、runtime、client 顺序启动并等待健康检查。
-- 启动时立即打开 `http://127.0.0.1:17890` 启动中心，展示安装、配置和健康检查进度。
-- 下载并在 `http://127.0.0.1:3000` 托管 Athena 前端单页应用。
-- 监控业务进程，异常退出后自动重启；正常停止时按相反顺序关闭。
-- 每次打开时比较本地与远程平台包 SHA256；发现变化后由用户确认，再停止旧服务、更新并重启。
-- 跨版本复用 Hash 相同的已校验安装包和数据库，不会重复下载或覆盖用户数据。
+Athena Launcher is the desktop installer and local service manager for the Athena agent platform. A user downloads one package for their operating system; the launcher installs a private PostgreSQL instance, downloads verified Runtime/Client/UI artifacts, generates compatible configuration, starts every service in order, and opens a visual startup center.
 
-`agent-runtime-client` 启动时会执行现有的全表迁移，runtime 会执行 memory 表迁移，因此用户无需手工建表。
+The launcher itself uses only the Go standard library and builds as a single executable.
 
-## 用户使用
+## What It Manages
 
-普通用户应从 GitHub Release 下载对应的桌面安装包：
+- Detects macOS, Linux, or Windows and `amd64`/`arm64` automatically.
+- Downloads PostgreSQL, Agent Runtime, Agent Runtime Client, and Athena Agent UI for the current platform.
+- Verifies every artifact against its SHA-256 value in `release-manifest.json`.
+- Initializes PostgreSQL in `~/.athena` with a random password and creates the `agent_runtime` database.
+- Generates matching Runtime, Client, and Skills configuration files.
+- Starts PostgreSQL, Runtime, Client, and UI in dependency order and checks health endpoints.
+- Shows installation, startup, update, and live-log progress at `http://127.0.0.1:17890`.
+- Serves the UI at `http://127.0.0.1:3000`.
+- Monitors managed services and restarts unexpected exits.
+- Compares local and remote package hashes on launch and asks before updating.
+- Reuses verified packages and preserves PostgreSQL/user data across service upgrades.
 
-- `Athena_<version>_macOS_arm64.dmg`：Apple Silicon Mac。
-- `Athena_<version>_macOS_amd64.dmg`：Intel Mac。
-- `Athena-Setup_<version>_windows_amd64.exe`：Windows 10/11 64 位安装器。
-- `Athena_<version>_linux_x86_64.AppImage`：Linux x86_64。
-- `Athena_<version>_linux_aarch64.AppImage`：Linux ARM64。
+## Architecture
 
-macOS 将 `Athena.app` 拖入 Applications 后双击，Windows 安装完成后可通过桌面或开始菜单启动。Linux AppImage 首次使用时需在文件属性中启用“允许作为程序执行”。桌面入口会立即打开启动中心，逐步显示 Manifest、PostgreSQL、runtime、client 和前端状态；失败时可以查看各服务日志并直接重试，全部就绪后自动进入 Athena。
-
-当前自动构建的安装包使用临时签名。公开大规模分发前，应配置 Apple Developer ID 公证和 Windows Authenticode 代码签名，避免系统显示“未知开发者”提示。
-
-命令行用户仍可下载原始单文件 launcher：
-
-发布版本应在编译时写入正式清单 URL，用户可直接运行：
-
-```bash
-./athena-launcher launch
-./athena-launcher start
-./athena-launcher status
-./athena-launcher stop
-./athena-launcher update
+```mermaid
+flowchart TD
+    Package["DMG, Windows installer, AppImage, or binary"] --> Launcher["Athena Launcher"]
+    Launcher --> Manifest["Release manifest + SHA-256"]
+    Manifest --> Packages["Platform artifacts"]
+    Launcher --> Startup["Startup Center :17890"]
+    Launcher --> PG["Managed PostgreSQL :15432"]
+    Launcher --> Runtime["Agent Runtime :18080/:18081"]
+    Launcher --> Client["Runtime Client :8090"]
+    Launcher --> UI["Athena UI :3000"]
+    PG --> Runtime
+    PG --> Client
+    Client --> Runtime
+    UI --> Client
 ```
 
-首次启动可能需要几分钟。当前启动状态保存在 `~/.athena/startup-status.json`，日志位于 `~/.athena/logs/`，生成配置位于 `~/.athena/config/`，数据库数据位于 `~/.athena/data/postgres/`。
+Startup sequence:
 
-未内置清单 URL 的开发版本可以显式传入清单：
+1. Load and validate the release manifest for the detected platform.
+2. Download missing/changed packages and verify SHA-256.
+3. Generate or reuse the local PostgreSQL cluster and credentials.
+4. Generate service configuration without overwriting the database data directory.
+5. Start PostgreSQL, Runtime, Client, then the UI.
+6. Wait for health checks and open Athena when every component is ready.
+
+## Install for End Users
+
+Download the latest package from [GitHub Releases](https://github.com/good-fish-man/athena-launcher/releases/latest):
+
+| Platform | Package |
+| --- | --- |
+| Apple Silicon Mac | `Athena_<version>_macOS_arm64.dmg` |
+| Intel Mac | `Athena_<version>_macOS_amd64.dmg` |
+| Windows 10/11 x64 | `Athena-Setup_<version>_windows_amd64.exe` |
+| Linux x86-64 | `Athena_<version>_linux_x86_64.AppImage` |
+| Linux ARM64 | `Athena_<version>_linux_aarch64.AppImage` |
+
+### macOS
+
+Open the DMG, drag **Athena** into Applications, and launch it. Public builds currently use ad-hoc signing unless release secrets are configured. If macOS reports that Apple cannot verify the app, right-click Athena and choose **Open**, or allow it in **System Settings > Privacy & Security**. Production distribution should use Developer ID signing and notarization.
+
+### Windows
+
+Run the installer, then open Athena from the Start menu or desktop shortcut. Production releases should be Authenticode-signed to avoid SmartScreen warnings.
+
+### Linux
+
+Mark the AppImage as executable and run it:
 
 ```bash
-./athena-launcher start --manifest /absolute/path/release-manifest.json
-./athena-launcher run --manifest https://downloads.example.com/athena/release-manifest.json
+chmod +x Athena_<version>_linux_x86_64.AppImage
+./Athena_<version>_linux_x86_64.AppImage
 ```
 
-`run` 在前台运行，适合调试或由 systemd/launchd/Windows Service 托管；`start` 在后台运行。
+The first launch can take several minutes because PostgreSQL and service packages are downloaded and initialized.
 
-## 发布构建
+## Startup Center and Logs
 
-运行测试并生成五个平台的单文件启动器：
+The launcher opens the startup center immediately. It displays manifest, package, configuration, database, Runtime, Client, and UI steps. On failure, select a log source, copy the error, fix the cause, and choose **Retry startup**.
 
-```bash
-make test
-make release VERSION=0.1.0 MANIFEST_URL=https://downloads.example.com/athena/release-manifest.json
-```
-
-生成 runtime/client 平台包：
-
-```bash
-TARGET_OS=darwin TARGET_ARCH=arm64 VERSION=0.1.0 ./scripts/package-services.sh
-TARGET_OS=linux TARGET_ARCH=amd64 VERSION=0.1.0 ./scripts/package-services.sh
-```
-
-脚本会同时输出 SHA256，把地址和校验值写入 `release-manifest.json`。清单结构可参考 [release-manifest.example.json](release-manifest.example.json)。示例中的域名和 `REPLACE_WITH_64_CHAR_SHA256` 必须替换后才能使用。
-
-正式 Release 可在 GitHub Actions 中运行 `Publish Release Manifest`。该工作流会：
-
-1. 检查 runtime、client 和 Athena UI 是否已发布同名 GitHub Release。
-2. 下载并校验 Maven Central 的 PostgreSQL 多平台精简包。
-3. 将 PostgreSQL 重新打包成 launcher 使用的标准目录。
-4. 下载同版本 runtime/client Release 资产并计算 SHA256。
-5. 下载同版本 Athena UI 静态资产并写入清单。
-6. 生成并发布 `release-manifest.json`、`SHA256SUMS` 和 PostgreSQL 平台包。
-7. 重新构建内置该 manifest URL 的 launcher。
-
-首次发布新 tag 时，应先在三个服务仓库运行各自的 `Release` 工作流，全部成功后再运行 launcher 的 `Publish Release Manifest`。GitHub 仓库之间的默认令牌相互隔离，因此 launcher 不会代替其他仓库创建 Release。
-
-PostgreSQL 发布包需要由发布流水线准备为自包含压缩包，解压后根目录必须包含：
+Default files:
 
 ```text
-bin/initdb
-bin/pg_ctl
-bin/postgres
+~/.athena/
+├── config/                 generated service configuration
+├── data/postgres/          persistent PostgreSQL data
+├── data/uploads/           uploads and generated reports
+├── data/skills/            user skills
+├── logs/launcher.log
+├── logs/postgres.log
+├── logs/agent-runtime.log
+├── logs/agent-runtime-client.log
+├── packages/               verified downloads
+├── services/               versioned service installations
+├── state.json
+└── startup-status.json
 ```
 
-Windows 文件带 `.exe`。若使用不同目录，可修改清单的 `database.bin_dir`。公网下载地址必须使用 HTTPS，本地开发地址允许 `localhost` HTTP 或绝对文件路径。
+Updating a PostgreSQL package does not delete `data/postgres`. Service packages and configuration can be replaced independently from user data.
 
-## 扩展服务
+## Command Line
 
-清单中的 `services` 是通用的有序服务列表，不限于当前两个后端。后续要托管其他本地服务，只需添加平台产物、启动参数、环境变量和健康检查：
+Desktop packages call the same command-line application internally:
+
+```bash
+athena-launcher launch
+athena-launcher start
+athena-launcher status
+athena-launcher stop
+athena-launcher update
+```
+
+| Command | Purpose |
+| --- | --- |
+| `launch` | Start if needed and open Startup Center/Athena |
+| `start` | Start the managed launcher in the background |
+| `run` | Run in the foreground for debugging or a service manager |
+| `install` | Download and prepare packages/configuration only |
+| `update` | Prepare the latest manifest packages |
+| `validate` | Validate a manifest for the current platform |
+| `status` | Print component health |
+| `stop` | Gracefully stop the managed launcher and services |
+| `version` | Print launcher and platform version |
+
+Common options and environment variables:
+
+```bash
+athena-launcher run --home /custom/athena --manifest /path/to/release-manifest.json
+athena-launcher validate --manifest https://example.com/release-manifest.json
+
+export ATHENA_HOME="$HOME/.athena"
+export ATHENA_MANIFEST_URL="https://example.com/release-manifest.json"
+```
+
+A production launcher embeds its release manifest URL during compilation. Development builds can use an absolute local path or a localhost HTTP URL. Public remote manifests must use HTTPS.
+
+## Updates and Recovery
+
+At startup, the launcher compares installed hashes with the current manifest. If packages differ, the startup center asks the user before stopping existing processes and installing new versions. Matching packages are reused and are not downloaded twice.
+
+If a port is occupied by a process recorded as Athena's managed process, the launcher stops that process before restart. It does not silently terminate unrelated applications. Use Startup Center logs and `athena-launcher status` to identify conflicts.
+
+To reset only downloaded service packages, stop Athena and remove the relevant version under `~/.athena/services` or `~/.athena/packages`; do not remove `~/.athena/data` unless user data should also be erased.
+
+## Build from Source
+
+Requirements: Go 1.24 or newer. The launcher has no third-party Go module dependencies.
+
+```bash
+git clone https://github.com/good-fish-man/athena-launcher.git
+cd athena-launcher
+make test
+make build
+```
+
+Build all launcher binaries:
+
+```bash
+make release VERSION=0.1.0 \
+  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/download/v0.1.0/release-manifest.json
+```
+
+Build desktop formats with the scripts in `packaging/macos`, `packaging/windows`, and `packaging/linux`, or run the repository's `Release` GitHub Actions workflow.
+
+## Release Manifest
+
+[`release-manifest.example.json`](release-manifest.example.json) documents the schema. Each database, frontend, and service artifact declares:
+
+- Platform key such as `darwin-arm64` or `windows-amd64`.
+- HTTPS URL.
+- 64-character SHA-256.
+- Archive format and executable path.
+- Service order and health URL where applicable.
+
+The `services` list is generic. Additional local workers can be added without changing the launcher:
 
 ```json
 {
   "name": "local-worker",
   "order": 30,
   "args": ["--config", "{config}/worker.yaml"],
-  "env": { "ATHENA_HOME": "{home}" },
+  "env": {"ATHENA_HOME": "{home}"},
   "health_url": "http://127.0.0.1:19000/healthz",
   "artifacts": {}
 }
 ```
 
-参数支持 `{home}`、`{config}` 和 `{install}` 占位符。
+Arguments support `{home}`, `{config}`, and `{install}` placeholders.
 
-## 安全边界
+## Release Order
 
-- 数据库仅监听 `127.0.0.1:15432`，密码随机生成并以 `0600` 权限保存。
-- 下载产物必须匹配清单 SHA256，解压时拒绝绝对路径和 `../` 路径穿越。
-- 安装更新只替换版本化服务目录，不删除 `~/.athena/data`。
-- 发布环境应通过 HTTPS 分发清单，并由发布系统保护清单写权限。
+For a new `vX.Y.Z` release:
+
+1. Publish the same tag in `agent-runtime`.
+2. Publish the same tag in `agent-runtime-client`.
+3. Publish the same tag in `athena-agent-ui`.
+4. Run **Publish Release Manifest** in this repository to collect assets, package PostgreSQL, calculate hashes, and publish `release-manifest.json`.
+5. Run or complete **Release** to publish raw launchers, DMGs, Windows installer, and AppImages with the manifest URL embedded.
+
+Repository-scoped GitHub tokens cannot create releases in the other repositories, so their releases must exist before manifest publication.
+
+## Security
+
+- Managed PostgreSQL listens only on `127.0.0.1:15432`.
+- The generated database password is stored in mode `0600` configuration/state files.
+- Artifact hashes are mandatory.
+- Archive extraction rejects absolute paths and `..` traversal.
+- Updates replace versioned installation directories, not `~/.athena/data`.
+- Remote manifests require HTTPS.
+- Protect release-manifest write access and configure platform code signing for public distribution.
+
+## Related Projects
+
+- [`agent-runtime`](https://github.com/good-fish-man/agent-runtime)
+- [`agent-runtime-client`](https://github.com/good-fish-man/agent-runtime-client)
+- [`athena-agent-ui`](https://github.com/good-fish-man/athena-agent-ui)
+
+## License
+
+Add a repository license before public redistribution. PostgreSQL and packaged service dependencies retain their own licenses.
