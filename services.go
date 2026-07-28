@@ -32,10 +32,11 @@ type supervisor struct {
 	processes   map[string]*managedProcess
 	exits       chan processExit
 	stopping    bool
+	tracker     *startupTracker
 }
 
-func newSupervisor(home string, paths *generatedPaths, manifest *Manifest, executables map[string]string) *supervisor {
-	return &supervisor{home: home, paths: paths, manifest: manifest, executables: executables, processes: make(map[string]*managedProcess), exits: make(chan processExit, len(manifest.Services)*2)}
+func newSupervisor(home string, paths *generatedPaths, manifest *Manifest, executables map[string]string, tracker *startupTracker) *supervisor {
+	return &supervisor{home: home, paths: paths, manifest: manifest, executables: executables, processes: make(map[string]*managedProcess), exits: make(chan processExit, len(manifest.Services)*2), tracker: tracker}
 }
 
 func (s *supervisor) StartAll(ctx context.Context) error {
@@ -60,6 +61,7 @@ func (s *supervisor) Run(ctx context.Context) error {
 				continue
 			}
 			fmt.Printf("[%s] exited: %v; restarting in 2 seconds\n", event.name, event.err)
+			s.tracker.begin(event.name, fmt.Sprintf("%s exited; restarting", event.name))
 			time.Sleep(2 * time.Second)
 			spec, ok := s.service(event.name)
 			if !ok {
@@ -68,11 +70,21 @@ func (s *supervisor) Run(ctx context.Context) error {
 			if err := s.start(ctx, spec); err != nil {
 				return fmt.Errorf("restart %s: %w", event.name, err)
 			}
+			if s.tracker != nil {
+				snapshot := s.tracker.current()
+				s.tracker.ready(snapshot.FrontendURL)
+			}
 		}
 	}
 }
 
-func (s *supervisor) start(ctx context.Context, spec ServiceSpec) error {
+func (s *supervisor) start(ctx context.Context, spec ServiceSpec) (returnErr error) {
+	s.tracker.begin(spec.Name, "Starting "+spec.Name)
+	defer func() {
+		if returnErr != nil {
+			s.tracker.fail(spec.Name, returnErr)
+		}
+	}()
 	executable := s.executables[spec.Name]
 	if executable == "" {
 		return fmt.Errorf("service %s is not installed", spec.Name)
@@ -124,6 +136,9 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) error {
 			return fmt.Errorf("%s health check: %w (log: %s)", spec.Name, err, logPath)
 		}
 		fmt.Printf("[%s] healthy at %s\n", spec.Name, healthURL)
+		s.tracker.complete(spec.Name, "Healthy at "+healthURL)
+	} else {
+		s.tracker.complete(spec.Name, fmt.Sprintf("Started with process ID %d", cmd.Process.Pid))
 	}
 	return nil
 }

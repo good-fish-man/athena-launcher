@@ -7,6 +7,7 @@ Athena Launcher 是一个零第三方 Go 依赖的单文件安装器和服务管
 - 在 `~/.athena` 初始化独立 PostgreSQL 数据目录，随机生成数据库密码并自动创建 `agent_runtime` 数据库。
 - 生成共享数据库、runtime、client 和 skills 配置。
 - 按 PostgreSQL、runtime、client 顺序启动并等待健康检查。
+- 启动时立即打开 `http://127.0.0.1:17890` 启动中心，展示安装、配置和健康检查进度。
 - 下载并在 `http://127.0.0.1:3000` 托管 Athena 前端单页应用。
 - 监控业务进程，异常退出后自动重启；正常停止时按相反顺序关闭。
 - 再次执行时复用已校验的安装包和数据库，不会重复下载或覆盖用户数据。
@@ -23,7 +24,7 @@ Athena Launcher 是一个零第三方 Go 依赖的单文件安装器和服务管
 - `Athena_<version>_linux_x86_64.AppImage`：Linux x86_64。
 - `Athena_<version>_linux_aarch64.AppImage`：Linux ARM64。
 
-macOS 将 `Athena.app` 拖入 Applications 后双击，Windows 安装完成后可通过桌面或开始菜单启动。Linux AppImage 首次使用时需在文件属性中启用“允许作为程序执行”。桌面入口会启动本地服务，等待首次安装完成并自动打开浏览器。
+macOS 将 `Athena.app` 拖入 Applications 后双击，Windows 安装完成后可通过桌面或开始菜单启动。Linux AppImage 首次使用时需在文件属性中启用“允许作为程序执行”。桌面入口会立即打开启动中心，逐步显示 Manifest、PostgreSQL、runtime、client 和前端状态；失败时可以查看各服务日志并直接重试，全部就绪后自动进入 Athena。
 
 当前自动构建的安装包使用临时签名。公开大规模分发前，应配置 Apple Developer ID 公证和 Windows Authenticode 代码签名，避免系统显示“未知开发者”提示。
 
@@ -39,7 +40,7 @@ macOS 将 `Athena.app` 拖入 Applications 后双击，Windows 安装完成后�
 ./athena-launcher update
 ```
 
-首次启动可能需要几分钟。日志位于 `~/.athena/logs/`，生成配置位于 `~/.athena/config/`，数据库数据位于 `~/.athena/data/postgres/`。
+首次启动可能需要几分钟。当前启动状态保存在 `~/.athena/startup-status.json`，日志位于 `~/.athena/logs/`，生成配置位于 `~/.athena/config/`，数据库数据位于 `~/.athena/data/postgres/`。
 
 未内置清单 URL 的开发版本可以显式传入清单：
 

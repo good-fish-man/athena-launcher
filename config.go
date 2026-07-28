@@ -21,6 +21,7 @@ const (
 	defaultRuntimeHTTPPort = 18081
 	defaultClientHTTPPort  = 8090
 	defaultFrontendPort    = 3000
+	defaultStartupPort     = 17890
 )
 
 // Release metadata can be injected at build time with -ldflags.
