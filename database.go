@@ -42,7 +42,10 @@ func (d *managedDatabase) Start(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(d.logPath), 0o700); err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(d.dataDir, "PG_VERSION")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(d.dataDir, "PG_VERSION")); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect postgres data directory: %w", err)
+		}
 		if err := d.initialize(ctx); err != nil {
 			return err
 		}

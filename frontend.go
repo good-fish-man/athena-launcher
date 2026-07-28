@@ -32,7 +32,7 @@ func startFrontendServer(manifest *Manifest, root string) (*frontendServer, erro
 	if err != nil {
 		return nil, fmt.Errorf("frontend listen %s: %w", address, err)
 	}
-	server := &http.Server{Addr: address, Handler: spaHandler(root), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Addr: address, Handler: requestErrorLogger("frontend", spaHandler(root)), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "[frontend]", err)

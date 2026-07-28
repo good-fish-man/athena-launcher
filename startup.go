@@ -271,7 +271,7 @@ func startStartupServer(tracker *startupTracker, control *startupController) (*s
 		return nil, fmt.Errorf("startup center listen %s: %w", address, err)
 	}
 	retry := make(chan struct{}, 1)
-	server := &http.Server{Addr: address, Handler: startupHandler(tracker, retry, control), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: address, Handler: requestErrorLogger("startup-center", startupHandler(tracker, retry, control)), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "[startup-center]", err)

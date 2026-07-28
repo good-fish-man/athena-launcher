@@ -196,11 +196,16 @@ func (s *supervisor) StopAll() {
 		if process == nil || process.cmd == nil || process.cmd.Process == nil {
 			continue
 		}
-		_ = process.cmd.Process.Signal(os.Interrupt)
+		if err := process.cmd.Process.Signal(os.Interrupt); err != nil {
+			fmt.Printf("[%s] graceful stop signal failed pid=%d err=%v\n", name, process.cmd.Process.Pid, err)
+		}
 		select {
 		case <-process.done:
 		case <-time.After(10 * time.Second):
-			_ = process.cmd.Process.Kill()
+			fmt.Printf("[%s] graceful stop timed out pid=%d; forcing termination\n", name, process.cmd.Process.Pid)
+			if err := process.cmd.Process.Kill(); err != nil {
+				fmt.Printf("[%s] force stop failed pid=%d err=%v\n", name, process.cmd.Process.Pid, err)
+			}
 			<-process.done
 		}
 		delete(s.processes, name)
