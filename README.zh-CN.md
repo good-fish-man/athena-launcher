@@ -78,6 +78,17 @@ chmod +x Athena_<version>_linux_x86_64.AppImage
 
 首次启动需要下载并初始化 PostgreSQL 与服务包，可能耗时几分钟。
 
+### 首次登录
+
+Agent Runtime Client 只会在数据库中不存在 `athena` 账号时创建初始管理员：
+
+```text
+账号：athena
+密码：athena
+```
+
+重启 Athena 不会重复创建账号，也不会把已修改的密码重置为 `athena`。该凭据只用于可信本机环境中的首次使用；向其他机器开放 Athena 前必须替换默认密码。
+
 ## 启动中心与日志
 
 Launcher 会立即打开启动中心，展示 Manifest、安装包、配置、数据库、Runtime、Client 和 UI 步骤。失败时可切换日志来源、复制错误，处理原因后点击 **重试启动**。

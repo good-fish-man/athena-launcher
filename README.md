@@ -78,6 +78,17 @@ chmod +x Athena_<version>_linux_x86_64.AppImage
 
 The first launch can take several minutes because PostgreSQL and service packages are downloaded and initialized.
 
+### First Login
+
+Agent Runtime Client creates the bootstrap administrator only when the `athena` account is absent from the database:
+
+```text
+username: athena
+password: athena
+```
+
+Restarting Athena does not recreate the account or reset a changed password. These credentials are intended only for initial use in a trusted local environment; replace the default password before exposing Athena to other machines.
+
 ## Startup Center and Logs
 
 The launcher opens the startup center immediately. It displays manifest, package, configuration, database, Runtime, Client, and UI steps. On failure, select a log source, copy the error, fix the cause, and choose **Retry startup**.
