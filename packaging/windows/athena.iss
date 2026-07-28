@@ -29,6 +29,9 @@ WizardStyle=modern
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "athena-launcher.exe"; Flags: ignoreversion
+Source: "{#SourcePath}\..\..\LICENSE"; DestDir: "{app}\licenses"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "{#SourcePath}\..\..\NOTICE"; DestDir: "{app}\licenses"; DestName: "NOTICE.txt"; Flags: ignoreversion
+Source: "{#SourcePath}\..\..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Athena"; Filename: "{app}\athena-launcher.exe"; Parameters: "launch"; WorkingDir: "{app}"

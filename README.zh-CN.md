@@ -221,4 +221,4 @@ GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Releas
 
 ## 许可证
 
-公开分发前请为仓库补充许可证。PostgreSQL 和打包的服务依赖继续使用各自许可证。
+Athena Launcher 使用 [Apache License 2.0](LICENSE)。版权和第三方说明参见 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。PostgreSQL 和下载/打包的服务继续使用各自许可证。

@@ -10,8 +10,9 @@ OUTPUT_DIR=${OUTPUT_DIR:-dist/installers}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 appdir="$work/Athena.AppDir"
-mkdir -p "$appdir/usr/bin" "$appdir/usr/share/icons/hicolor/scalable/apps" "$OUTPUT_DIR"
+mkdir -p "$appdir/usr/bin" "$appdir/usr/share/doc/athena" "$appdir/usr/share/icons/hicolor/scalable/apps" "$OUTPUT_DIR"
 cp "$BINARY" "$appdir/usr/bin/athena-launcher"
+cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$appdir/usr/share/doc/athena/"
 chmod 755 "$appdir/usr/bin/athena-launcher"
 cp packaging/athena.svg "$appdir/athena.svg"
 cp packaging/athena.svg "$appdir/usr/share/icons/hicolor/scalable/apps/athena.svg"

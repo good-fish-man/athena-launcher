@@ -175,6 +175,7 @@ jobs:
     needs: [build, macos-dmg, windows-installer, linux-appimage]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
         with:
           path: release
@@ -185,4 +186,4 @@ jobs:
         run: |
           sha256sum release/* > SHA256SUMS-launchers.txt
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" release/* SHA256SUMS-launchers.txt --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" release/* SHA256SUMS-launchers.txt LICENSE NOTICE THIRD_PARTY_NOTICES.md --repo "$GITHUB_REPOSITORY" --clobber

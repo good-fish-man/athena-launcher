@@ -221,4 +221,4 @@ Repository-scoped GitHub tokens cannot create releases in the other repositories
 
 ## License
 
-Add a repository license before public redistribution. PostgreSQL and packaged service dependencies retain their own licenses.
+Athena Launcher is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). PostgreSQL and downloaded/packaged services retain their own licenses.

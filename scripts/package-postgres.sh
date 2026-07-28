@@ -69,6 +69,12 @@ fi
 
 postgres_root=$(dirname "$(dirname "$initdb")")
 cp -R "$postgres_root/." "$work/package/"
+postgres_license=$(find "$postgres_root" -type f \( -iname 'copyright' -o -iname 'license' -o -iname 'license.txt' \) | head -n 1)
+if [ -n "$postgres_license" ]; then
+  cp "$postgres_license" "$work/package/POSTGRESQL-LICENSE.txt"
+else
+  echo "warning: PostgreSQL license file was not present in $filename; retaining the upstream license URL in ATHENA-POSTGRES-NOTICE.txt" >&2
+fi
 ./scripts/fix-postgres-library-links.sh "$work/package" "$PLATFORM"
 for binary in initdb pg_ctl postgres; do
   if [ ! -f "$work/package/bin/$binary$suffix" ]; then
@@ -83,6 +89,7 @@ $url
 
 The embedded-postgres-binaries project is distributed under Apache-2.0.
 PostgreSQL is distributed under the PostgreSQL License.
+License text: https://www.postgresql.org/about/licence/
 EOF
 
 output="$OUTPUT_DIR/postgres_${POSTGRES_VERSION}_${PLATFORM%-*}_${PLATFORM#*-}.tar.gz"

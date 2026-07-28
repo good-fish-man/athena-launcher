@@ -11,8 +11,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 app="$work/Athena.app"
 contents="$app/Contents"
-mkdir -p "$contents/MacOS" "$contents/Resources" "$OUTPUT_DIR"
+mkdir -p "$contents/MacOS" "$contents/Resources/licenses" "$OUTPUT_DIR"
 cp "$BINARY" "$contents/MacOS/athena-launcher"
+cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$contents/Resources/licenses/"
 chmod 755 "$contents/MacOS/athena-launcher"
 
 cat > "$contents/MacOS/Athena" <<'EOF'
