@@ -198,8 +198,8 @@ make release VERSION=0.1.0 \
 1. 在 `agent-runtime` 发布相同 Tag。
 2. 在 `agent-runtime-client` 发布相同 Tag。
 3. 在 `athena-agent-ui` 发布相同 Tag。
-4. 在本仓库运行 **Publish Release Manifest**，收集产物、打包 PostgreSQL、计算 Hash 并发布 `release-manifest.json`。
-5. 运行或完成 **Release**，发布嵌入 Manifest URL 的单文件、DMG、Windows 安装包和 AppImage。
+4. 推送 Launcher 的发布 Tag。**Release** 发布启动器后，会自动启动 **Publish Release Manifest**，收集服务产物、打包 PostgreSQL、计算 Hash 并发布 `release-manifest.json`。
+5. **Publish Release Manifest** 会使用已发布的 Manifest URL 再构建一次启动器。旧 Release 如果缺少清单，可使用相同 Tag 手动补跑该工作流。
 
 GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Release 必须先存在。
 

@@ -198,8 +198,8 @@ For a new `vX.Y.Z` release:
 1. Publish the same tag in `agent-runtime`.
 2. Publish the same tag in `agent-runtime-client`.
 3. Publish the same tag in `athena-agent-ui`.
-4. Run **Publish Release Manifest** in this repository to collect assets, package PostgreSQL, calculate hashes, and publish `release-manifest.json`.
-5. Run or complete **Release** to publish raw launchers, DMGs, Windows installer, and AppImages with the manifest URL embedded.
+4. Push the Launcher release tag. After **Release** publishes the launchers, it automatically starts **Publish Release Manifest** to collect service assets, package PostgreSQL, calculate hashes, and publish `release-manifest.json`.
+5. **Publish Release Manifest** rebuilds the launchers once with the published manifest URL embedded. If the manifest is missing from an older release, run that workflow manually with the same tag.
 
 Repository-scoped GitHub tokens cannot create releases in the other repositories, so their releases must exist before manifest publication.
 
