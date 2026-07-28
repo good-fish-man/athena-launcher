@@ -78,6 +78,22 @@ func saveInstalledManifest(home string, manifest *Manifest) error {
 	return nil
 }
 
+func loadInstalledManifest(home string) (*Manifest, error) {
+	path := filepath.Join(home, installedManifestName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read installed manifest: %w", err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("parse installed manifest: %w", err)
+	}
+	if err := manifest.validate(); err != nil {
+		return nil, fmt.Errorf("validate installed manifest: %w", err)
+	}
+	return &manifest, nil
+}
+
 func shortHash(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) > 12 {

@@ -344,6 +344,11 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *sta
 		if !acceptStartupAction(response, request, control != nil) {
 			return
 		}
+		update := tracker.current().Update
+		if update.State != "available" || !update.CanDefer {
+			http.Error(response, "no deferrable package update is awaiting approval", http.StatusConflict)
+			return
+		}
 		tracker.clearUpdate("Update postponed")
 		signalStartupAction(control.dismissUpdate)
 		response.WriteHeader(http.StatusAccepted)

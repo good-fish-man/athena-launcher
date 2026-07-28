@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -26,10 +29,10 @@ func TestSupervisorReturnsUpdateRequestAfterApproval(t *testing.T) {
 func TestCheckPackageUpdatesComparesInstalledMarkers(t *testing.T) {
 	home := t.TempDir()
 	manifest := updateTestManifest()
-	writeArtifactMarker(t, filepath.Join(home, "postgres", "16.12.0"), databaseArtifactMarker("old-db"))
-	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime", "0.1.0"), "old-runtime")
-	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime-client", "0.1.0"), "client-hash")
-	writeArtifactMarker(t, filepath.Join(home, "frontend", "0.1.0"), "ui-hash")
+	writeArtifactMarker(t, filepath.Join(home, "postgres", "16.12.0"), databaseArtifactMarker(testHash("old-db")))
+	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime", "0.1.0"), testHash("old-runtime"))
+	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime-client", "0.1.0"), testHash("client"))
+	writeArtifactMarker(t, filepath.Join(home, "frontend", "0.1.0"), testHash("ui"))
 
 	updates := checkPackageUpdates(home, manifest)
 	if len(updates) != 2 {
@@ -38,7 +41,7 @@ func TestCheckPackageUpdatesComparesInstalledMarkers(t *testing.T) {
 	if updates[0].Component != "postgres" || updates[1].Component != "agent-runtime" {
 		t.Fatalf("unexpected updates: %+v", updates)
 	}
-	if updates[1].CurrentHash != "old-runtime" || updates[1].RemoteHash != "runtime-hash" {
+	if updates[1].CurrentHash != testHash("old-runtime") || updates[1].RemoteHash != testHash("runtime") {
 		t.Fatalf("unexpected runtime hashes: %+v", updates[1])
 	}
 }
@@ -46,7 +49,7 @@ func TestCheckPackageUpdatesComparesInstalledMarkers(t *testing.T) {
 func TestCheckPackageUpdatesIgnoresMissingAndMatchingPackages(t *testing.T) {
 	home := t.TempDir()
 	manifest := updateTestManifest()
-	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime", "0.1.0"), "runtime-hash")
+	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime", "0.1.0"), testHash("runtime"))
 
 	if updates := checkPackageUpdates(home, manifest); len(updates) != 0 {
 		t.Fatalf("matching or missing packages reported as updates: %+v", updates)
@@ -86,6 +89,49 @@ func TestSaveInstalledManifest(t *testing.T) {
 	if !strings.Contains(string(data), `"version": "0.2.0"`) {
 		t.Fatalf("unexpected installed manifest: %s", data)
 	}
+	loaded, err := loadInstalledManifest(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Version != manifest.Version {
+		t.Fatalf("loadInstalledManifest() version = %q, want %q", loaded.Version, manifest.Version)
+	}
+}
+
+func TestPrepareUsesInstalledManifestWhenUpdateIsDismissed(t *testing.T) {
+	home := t.TempDir()
+	remote := updateTestManifest()
+	installed := updateTestManifest()
+	installed.Version = "0.1.0"
+	installed.Database.Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/old-db.tar.gz", SHA256: testHash("old-db")}
+	installed.Services[0].Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/old-runtime.tar.gz", SHA256: testHash("old-runtime"), Executable: "agent-runtime"}
+	if err := saveInstalledManifest(home, installed); err != nil {
+		t.Fatal(err)
+	}
+	writeArtifactMarker(t, filepath.Join(home, "postgres", "16.13.0"), databaseArtifactMarker(testHash("old-db")))
+	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime", "0.1.0"), testHash("old-runtime"))
+	writeArtifactMarker(t, filepath.Join(home, "services", "agent-runtime-client", "0.1.0"), testHash("client"))
+	writeArtifactMarker(t, filepath.Join(home, "frontend", "0.1.0"), testHash("ui"))
+	writeTestExecutable(t, filepath.Join(home, "services", "agent-runtime", "0.1.0", "agent-runtime"))
+	writeTestExecutable(t, filepath.Join(home, "services", "agent-runtime-client", "0.1.0", "agent-runtime-client"))
+
+	manifestPath := filepath.Join(home, "remote-manifest.json")
+	data, err := json.Marshal(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	control := newStartupController()
+	control.dismissUpdate <- struct{}{}
+	selected, _, _, err := prepareWithTracker(context.Background(), options{home: home, manifestSource: manifestPath}, newStartupTracker(home), control, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Version != installed.Version {
+		t.Fatalf("selected manifest version = %q, want installed %q", selected.Version, installed.Version)
+	}
 }
 
 func updateTestManifest() *Manifest {
@@ -93,13 +139,13 @@ func updateTestManifest() *Manifest {
 	return &Manifest{
 		Version: "0.2.0",
 		Database: DatabaseSpec{Version: "16.13.0", Artifacts: map[string]Artifact{
-			platform: {SHA256: "new-db"},
+			platform: {URL: "https://downloads.example/db.tar.gz", SHA256: testHash("new-db")},
 		}},
 		Services: []ServiceSpec{
-			{Name: "agent-runtime", Artifacts: map[string]Artifact{platform: {SHA256: "runtime-hash"}}},
-			{Name: "agent-runtime-client", Artifacts: map[string]Artifact{platform: {SHA256: "client-hash"}}},
+			{Name: "agent-runtime", Artifacts: map[string]Artifact{platform: {URL: "https://downloads.example/runtime.tar.gz", SHA256: testHash("runtime"), Executable: "agent-runtime"}}},
+			{Name: "agent-runtime-client", Artifacts: map[string]Artifact{platform: {URL: "https://downloads.example/client.tar.gz", SHA256: testHash("client"), Executable: "agent-runtime-client"}}},
 		},
-		Frontend: &FrontendSpec{Artifacts: map[string]Artifact{platform: {SHA256: "ui-hash"}}},
+		Frontend: &FrontendSpec{Artifacts: map[string]Artifact{platform: {URL: "https://downloads.example/ui.tar.gz", SHA256: testHash("ui")}}},
 	}
 }
 
@@ -111,4 +157,19 @@ func writeArtifactMarker(t *testing.T, root, hash string) {
 	if err := os.WriteFile(filepath.Join(root, ".artifact-sha256"), []byte(hash+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeTestExecutable(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("test executable"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }

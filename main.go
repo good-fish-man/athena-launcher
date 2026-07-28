@@ -136,12 +136,22 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 	}
 	tracker.complete("manifest", fmt.Sprintf("Release %s verified for %s", manifest.Version, platformKey()))
 	if updates := checkPackageUpdates(opts.home, manifest); len(updates) > 0 && control != nil && !updateApproved {
-		tracker.offerUpdate(updates, false)
+		installedManifest, installedErr := loadInstalledManifest(opts.home)
+		canDefer := installedErr == nil
+		tracker.offerUpdate(updates, canDefer)
+		var dismissUpdate <-chan struct{}
+		if canDefer {
+			dismissUpdate = control.dismissUpdate
+		}
 		select {
 		case <-ctx.Done():
 			return nil, nil, nil, ctx.Err()
 		case <-control.applyUpdate:
 			tracker.applyingUpdate()
+		case <-dismissUpdate:
+			manifest = installedManifest
+			tracker.clearUpdate("Update postponed; using installed packages")
+			tracker.complete("manifest", fmt.Sprintf("Using installed release %s", manifest.Version))
 		}
 	}
 

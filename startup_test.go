@@ -50,7 +50,8 @@ func TestStartupHandlerExposesStatusAndKnownLogs(t *testing.T) {
 	}
 	retry := make(chan struct{}, 1)
 	control := newStartupController()
-	handler := startupHandler(newStartupTracker(home), retry, control)
+	tracker := newStartupTracker(home)
+	handler := startupHandler(tracker, retry, control)
 
 	statusResponse := httptest.NewRecorder()
 	handler.ServeHTTP(statusResponse, httptest.NewRequest(http.MethodGet, "/api/status", nil))
@@ -96,6 +97,23 @@ func TestStartupHandlerExposesStatusAndKnownLogs(t *testing.T) {
 	handler.ServeHTTP(applyResponse, httptest.NewRequest(http.MethodPost, "/api/update/apply", nil))
 	if applyResponse.Code != http.StatusConflict {
 		t.Fatalf("update apply without offer response = %d", applyResponse.Code)
+	}
+
+	dismissResponse := httptest.NewRecorder()
+	handler.ServeHTTP(dismissResponse, httptest.NewRequest(http.MethodPost, "/api/update/dismiss", nil))
+	if dismissResponse.Code != http.StatusConflict {
+		t.Fatalf("update dismiss without deferrable offer response = %d", dismissResponse.Code)
+	}
+	tracker.offerUpdate([]packageUpdate{{Component: "agent-runtime", DisplayName: "Agent Runtime"}}, true)
+	dismissResponse = httptest.NewRecorder()
+	handler.ServeHTTP(dismissResponse, httptest.NewRequest(http.MethodPost, "/api/update/dismiss", nil))
+	if dismissResponse.Code != http.StatusAccepted {
+		t.Fatalf("deferrable update dismiss response = %d", dismissResponse.Code)
+	}
+	select {
+	case <-control.dismissUpdate:
+	default:
+		t.Fatal("update dismiss signal was not delivered")
 	}
 }
 
