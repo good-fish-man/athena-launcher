@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Athena release tag, for example v0.1.1
+        description: Runtime, client, and frontend release tag
         required: true
         default: v0.1.1
+      launcher_tag:
+        description: Launcher release receiving the manifest and PostgreSQL assets
+        required: true
+        default: v0.1.2
       postgres_version:
         description: PostgreSQL binary version
         required: true
@@ -17,7 +21,8 @@ permissions:
   actions: write
 
 env:
-  RELEASE_TAG: ${{ inputs.tag }}
+  SERVICE_TAG: ${{ inputs.tag }}
+  LAUNCHER_TAG: ${{ inputs.launcher_tag }}
   POSTGRES_VERSION: ${{ inputs.postgres_version }}
 
 jobs:
@@ -31,9 +36,9 @@ jobs:
           set -euo pipefail
           missing=0
           for repo in agent-runtime agent-runtime-client athena-agent-ui; do
-            if ! gh release view "$RELEASE_TAG" --repo "good-fish-man/$repo" >/dev/null 2>&1; then
-              echo "::error title=Missing service release::good-fish-man/$repo has no GitHub Release named $RELEASE_TAG"
-              echo "Create it with: gh workflow run release.yml -R good-fish-man/$repo --ref main -f tag=$RELEASE_TAG"
+            if ! gh release view "$SERVICE_TAG" --repo "good-fish-man/$repo" >/dev/null 2>&1; then
+              echo "::error title=Missing service release::good-fish-man/$repo has no GitHub Release named $SERVICE_TAG"
+              echo "Create it with: gh workflow run release.yml -R good-fish-man/$repo --ref main -f tag=$SERVICE_TAG"
               missing=1
             fi
           done
@@ -85,14 +90,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "$RELEASE_TAG" --repo good-fish-man/agent-runtime --pattern "agent-runtime_${RELEASE_TAG}_*" --dir release-assets
-          gh release download "$RELEASE_TAG" --repo good-fish-man/agent-runtime-client --pattern "agent-runtime-client_${RELEASE_TAG}_*" --dir release-assets
-          gh release download "$RELEASE_TAG" --repo good-fish-man/athena-agent-ui --pattern "athena-agent-ui_${RELEASE_TAG}.tar.gz" --dir release-assets
+          gh release download "$SERVICE_TAG" --repo good-fish-man/agent-runtime --pattern "agent-runtime_${SERVICE_TAG}_*" --dir release-assets
+          gh release download "$SERVICE_TAG" --repo good-fish-man/agent-runtime-client --pattern "agent-runtime-client_${SERVICE_TAG}_*" --dir release-assets
+          gh release download "$SERVICE_TAG" --repo good-fish-man/athena-agent-ui --pattern "athena-agent-ui_${SERVICE_TAG}.tar.gz" --dir release-assets
       - name: Generate signed-by-checksum manifest
         env:
           ASSET_DIR: release-assets
           OUTPUT: release-manifest.json
           TAG: ${{ inputs.tag }}
+          LAUNCHER_TAG: ${{ inputs.launcher_tag }}
         run: |
           ./scripts/generate-release-manifest.sh
           jq empty release-manifest.json
@@ -102,8 +108,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" release-assets/postgres_* release-manifest.json SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$LAUNCHER_TAG"
+          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
       - uses: actions/upload-artifact@v7
         with:
           name: release-manifest
@@ -113,4 +119,4 @@ jobs:
       - name: Rebuild launchers with embedded manifest URL
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$RELEASE_TAG"
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$LAUNCHER_TAG" -f service_tag="$SERVICE_TAG"

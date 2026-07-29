@@ -204,13 +204,13 @@ Arguments support `{home}`, `{config}`, and `{install}` placeholders.
 
 ## Release Order
 
-For a new `vX.Y.Z` release:
+Launcher and service releases may use different versions. For example, Launcher `v0.1.2` can install services `v0.1.1`:
 
 1. Publish the same tag in `agent-runtime`.
 2. Publish the same tag in `agent-runtime-client`.
 3. Publish the same tag in `athena-agent-ui`.
-4. Push the Launcher release tag. After **Release** publishes the launchers, it automatically starts **Publish Release Manifest** to collect service assets, package PostgreSQL, calculate hashes, and publish `release-manifest.json`.
-5. **Publish Release Manifest** rebuilds the launchers once with the published manifest URL embedded. If the manifest is missing from an older release, run that workflow manually with the same tag.
+4. Push the Launcher release tag. Run **Release** with `tag=v0.1.2` and `service_tag=v0.1.1`; it collects those service assets, packages PostgreSQL, calculates hashes, and publishes `release-manifest.json` to the Launcher release.
+5. **Publish Release Manifest** rebuilds the launchers once with the published manifest URL embedded. If a manifest is missing, run that workflow manually with both the service and Launcher tags.
 
 Repository-scoped GitHub tokens cannot create releases in the other repositories, so their releases must exist before manifest publication.
 

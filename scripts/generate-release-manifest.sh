@@ -2,6 +2,7 @@
 set -eu
 
 TAG=${TAG:-v0.1.1}
+LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
@@ -60,30 +61,31 @@ done
 
 release_url() {
   repo=$1
-  asset=$2
-  printf 'https://github.com/%s/releases/download/%s/%s' "$repo" "$TAG" "$asset"
+  tag=$2
+  asset=$3
+  printf 'https://github.com/%s/releases/download/%s/%s' "$repo" "$tag" "$asset"
 }
 
 jq -n \
   --arg version "${TAG#v}" \
   --arg tag "$TAG" \
   --arg postgres_version "$POSTGRES_VERSION" \
-  --arg p_da_url "$(release_url "$LAUNCHER_REPO" "$postgres_darwin_arm64")" --arg p_da_sha "$(sha256 "$ASSET_DIR/$postgres_darwin_arm64")" \
-  --arg p_dx_url "$(release_url "$LAUNCHER_REPO" "$postgres_darwin_amd64")" --arg p_dx_sha "$(sha256 "$ASSET_DIR/$postgres_darwin_amd64")" \
-  --arg p_la_url "$(release_url "$LAUNCHER_REPO" "$postgres_linux_arm64")" --arg p_la_sha "$(sha256 "$ASSET_DIR/$postgres_linux_arm64")" \
-  --arg p_lx_url "$(release_url "$LAUNCHER_REPO" "$postgres_linux_amd64")" --arg p_lx_sha "$(sha256 "$ASSET_DIR/$postgres_linux_amd64")" \
-  --arg p_wx_url "$(release_url "$LAUNCHER_REPO" "$postgres_windows_amd64")" --arg p_wx_sha "$(sha256 "$ASSET_DIR/$postgres_windows_amd64")" \
-  --arg r_da_url "$(release_url "$RUNTIME_REPO" "$runtime_darwin_arm64")" --arg r_da_sha "$(sha256 "$ASSET_DIR/$runtime_darwin_arm64")" \
-  --arg r_dx_url "$(release_url "$RUNTIME_REPO" "$runtime_darwin_amd64")" --arg r_dx_sha "$(sha256 "$ASSET_DIR/$runtime_darwin_amd64")" \
-  --arg r_la_url "$(release_url "$RUNTIME_REPO" "$runtime_linux_arm64")" --arg r_la_sha "$(sha256 "$ASSET_DIR/$runtime_linux_arm64")" \
-  --arg r_lx_url "$(release_url "$RUNTIME_REPO" "$runtime_linux_amd64")" --arg r_lx_sha "$(sha256 "$ASSET_DIR/$runtime_linux_amd64")" \
-  --arg r_wx_url "$(release_url "$RUNTIME_REPO" "$runtime_windows_amd64")" --arg r_wx_sha "$(sha256 "$ASSET_DIR/$runtime_windows_amd64")" \
-  --arg c_da_url "$(release_url "$CLIENT_REPO" "$client_darwin_arm64")" --arg c_da_sha "$(sha256 "$ASSET_DIR/$client_darwin_arm64")" \
-  --arg c_dx_url "$(release_url "$CLIENT_REPO" "$client_darwin_amd64")" --arg c_dx_sha "$(sha256 "$ASSET_DIR/$client_darwin_amd64")" \
-  --arg c_la_url "$(release_url "$CLIENT_REPO" "$client_linux_arm64")" --arg c_la_sha "$(sha256 "$ASSET_DIR/$client_linux_arm64")" \
-  --arg c_lx_url "$(release_url "$CLIENT_REPO" "$client_linux_amd64")" --arg c_lx_sha "$(sha256 "$ASSET_DIR/$client_linux_amd64")" \
-  --arg c_wx_url "$(release_url "$CLIENT_REPO" "$client_windows_amd64")" --arg c_wx_sha "$(sha256 "$ASSET_DIR/$client_windows_amd64")" \
-  --arg frontend_url "$(release_url "$FRONTEND_REPO" "$frontend_asset")" --arg frontend_sha "$(sha256 "$ASSET_DIR/$frontend_asset")" \
+  --arg p_da_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_darwin_arm64")" --arg p_da_sha "$(sha256 "$ASSET_DIR/$postgres_darwin_arm64")" \
+  --arg p_dx_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_darwin_amd64")" --arg p_dx_sha "$(sha256 "$ASSET_DIR/$postgres_darwin_amd64")" \
+  --arg p_la_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_linux_arm64")" --arg p_la_sha "$(sha256 "$ASSET_DIR/$postgres_linux_arm64")" \
+  --arg p_lx_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_linux_amd64")" --arg p_lx_sha "$(sha256 "$ASSET_DIR/$postgres_linux_amd64")" \
+  --arg p_wx_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_windows_amd64")" --arg p_wx_sha "$(sha256 "$ASSET_DIR/$postgres_windows_amd64")" \
+  --arg r_da_url "$(release_url "$RUNTIME_REPO" "$TAG" "$runtime_darwin_arm64")" --arg r_da_sha "$(sha256 "$ASSET_DIR/$runtime_darwin_arm64")" \
+  --arg r_dx_url "$(release_url "$RUNTIME_REPO" "$TAG" "$runtime_darwin_amd64")" --arg r_dx_sha "$(sha256 "$ASSET_DIR/$runtime_darwin_amd64")" \
+  --arg r_la_url "$(release_url "$RUNTIME_REPO" "$TAG" "$runtime_linux_arm64")" --arg r_la_sha "$(sha256 "$ASSET_DIR/$runtime_linux_arm64")" \
+  --arg r_lx_url "$(release_url "$RUNTIME_REPO" "$TAG" "$runtime_linux_amd64")" --arg r_lx_sha "$(sha256 "$ASSET_DIR/$runtime_linux_amd64")" \
+  --arg r_wx_url "$(release_url "$RUNTIME_REPO" "$TAG" "$runtime_windows_amd64")" --arg r_wx_sha "$(sha256 "$ASSET_DIR/$runtime_windows_amd64")" \
+  --arg c_da_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_darwin_arm64")" --arg c_da_sha "$(sha256 "$ASSET_DIR/$client_darwin_arm64")" \
+  --arg c_dx_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_darwin_amd64")" --arg c_dx_sha "$(sha256 "$ASSET_DIR/$client_darwin_amd64")" \
+  --arg c_la_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_linux_arm64")" --arg c_la_sha "$(sha256 "$ASSET_DIR/$client_linux_arm64")" \
+  --arg c_lx_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_linux_amd64")" --arg c_lx_sha "$(sha256 "$ASSET_DIR/$client_linux_amd64")" \
+  --arg c_wx_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_windows_amd64")" --arg c_wx_sha "$(sha256 "$ASSET_DIR/$client_windows_amd64")" \
+  --arg frontend_url "$(release_url "$FRONTEND_REPO" "$TAG" "$frontend_asset")" --arg frontend_sha "$(sha256 "$ASSET_DIR/$frontend_asset")" \
   '{
     version: $version,
     database: {
