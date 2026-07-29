@@ -171,7 +171,7 @@ make build
 Build all launcher binaries:
 
 ```bash
-make release VERSION=0.1.1 \
+make release VERSION=0.1.2 \
   MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json
 ```
 

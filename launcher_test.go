@@ -16,6 +16,17 @@ import (
 	"testing"
 )
 
+func TestDefaultManifestUsesLatestPublicRelease(t *testing.T) {
+	t.Setenv("ATHENA_MANIFEST_URL", "")
+	original := defaultManifestURL
+	defaultManifestURL = publicManifestURL
+	t.Cleanup(func() { defaultManifestURL = original })
+
+	if got := defaultManifest(t.TempDir()); got != publicManifestURL {
+		t.Fatalf("defaultManifest() = %q, want %q", got, publicManifestURL)
+	}
+}
+
 func TestManifestValidation(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
 	manifest := &Manifest{

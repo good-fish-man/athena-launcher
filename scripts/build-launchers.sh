@@ -2,9 +2,9 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${VERSION:-0.1.1}
+VERSION=${VERSION:-0.1.2}
 DIST=${DIST:-dist}
-MANIFEST_URL=${MANIFEST_URL:-}
+MANIFEST_URL=${MANIFEST_URL:-https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json}
 OUTPUT="$ROOT/$DIST/launchers"
 
 mkdir -p "$OUTPUT"

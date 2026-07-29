@@ -83,14 +83,10 @@ func run(args []string) error {
 }
 
 func launchDesktop(opts options) error {
-	frontendAddress := fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort)
 	startupAddress := fmt.Sprintf("http://127.0.0.1:%d/", defaultStartupPort)
 	if startupCenterHealthy() {
 		requestStartupUpdateCheck()
 		return openBrowser(startupAddress)
-	}
-	if healthyURL(frontendAddress) {
-		return openBrowser(frontendAddress)
 	}
 	if err := startDetached(opts); err != nil {
 		return err
@@ -102,9 +98,6 @@ func launchDesktop(opts options) error {
 	for {
 		if startupCenterHealthy() {
 			return openBrowser(startupAddress)
-		}
-		if healthyURL(frontendAddress) {
-			return openBrowser(frontendAddress)
 		}
 		select {
 		case <-deadline.C:
@@ -329,10 +322,6 @@ func startDetached(opts options) error {
 	if startupCenterHealthy() {
 		requestStartupUpdateCheck()
 		fmt.Printf("Athena is already running; checking updates at http://127.0.0.1:%d\n", defaultStartupPort)
-		return nil
-	}
-	if healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort)) {
-		fmt.Printf("Athena is already running: http://127.0.0.1:%d\n", defaultClientHTTPPort)
 		return nil
 	}
 	executable, err := os.Executable()

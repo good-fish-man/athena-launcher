@@ -22,12 +22,13 @@ const (
 	defaultClientHTTPPort  = 8090
 	defaultFrontendPort    = 3000
 	defaultStartupPort     = 17890
+	publicManifestURL      = "https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json"
 )
 
 // Release metadata can be injected at build time with -ldflags.
 var (
-	launcherVersion    = "0.1.1"
-	defaultManifestURL string
+	launcherVersion    = "0.1.2"
+	defaultManifestURL = publicManifestURL
 )
 
 type Manifest struct {
