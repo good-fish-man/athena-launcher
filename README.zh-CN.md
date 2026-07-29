@@ -171,7 +171,7 @@ make build
 构建全部平台单文件：
 
 ```bash
-make release VERSION=0.1.2 \
+make release VERSION=0.1.3 \
   MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json
 ```
 
@@ -204,12 +204,12 @@ make release VERSION=0.1.2 \
 
 ## 发布顺序
 
-Launcher 与服务可以使用不同版本。例如当前 Launcher 为 `v0.1.2`，服务为 `v0.1.1`：
+Launcher 与服务可以使用不同版本。例如当前 Launcher 为 `v0.1.3`，服务为 `v0.1.1`：
 
 1. 在 `agent-runtime` 发布相同 Tag。
 2. 在 `agent-runtime-client` 发布相同 Tag。
 3. 在 `athena-agent-ui` 发布相同 Tag。
-4. 推送 Launcher 的发布 Tag。运行 **Release** 时分别填写 `tag=v0.1.2` 和 `service_tag=v0.1.1`；工作流会收集对应服务产物、打包 PostgreSQL、计算 Hash 并把 `release-manifest.json` 发布到 Launcher Release。
+4. 推送 Launcher 的发布 Tag。运行 **Release** 时分别填写 `tag=v0.1.3` 和 `service_tag=v0.1.1`；工作流会收集对应服务产物、打包 PostgreSQL、计算 Hash 并把 `release-manifest.json` 发布到 Launcher Release。
 5. **Publish Release Manifest** 会使用已发布的 Manifest URL 再构建一次启动器。Release 如果缺少清单，可填写服务 Tag 和 Launcher Tag 手动补跑该工作流。
 
 GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Release 必须先存在。

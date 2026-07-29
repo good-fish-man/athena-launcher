@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -114,6 +115,8 @@ func TestPrepareUsesInstalledManifestWhenUpdateIsDismissed(t *testing.T) {
 	writeArtifactMarker(t, filepath.Join(home, "frontend", "0.1.0"), testHash("ui"))
 	writeTestExecutable(t, filepath.Join(home, "services", "agent-runtime", "0.1.0", "agent-runtime"))
 	writeTestExecutable(t, filepath.Join(home, "services", "agent-runtime-client", "0.1.0", "agent-runtime-client"))
+	writeTestDatabaseBinaries(t, filepath.Join(home, "postgres", "16.13.0"))
+	writeTestExecutable(t, filepath.Join(home, "frontend", "0.1.0", "index.html"))
 
 	manifestPath := filepath.Join(home, "remote-manifest.json")
 	data, err := json.Marshal(remote)
@@ -131,6 +134,17 @@ func TestPrepareUsesInstalledManifestWhenUpdateIsDismissed(t *testing.T) {
 	}
 	if selected.Version != installed.Version {
 		t.Fatalf("selected manifest version = %q, want installed %q", selected.Version, installed.Version)
+	}
+}
+
+func TestInstalledPackagesUsableRejectsMissingService(t *testing.T) {
+	home := t.TempDir()
+	manifest := updateTestManifest()
+	writeArtifactMarker(t, filepath.Join(home, "postgres", "16.13.0"), databaseArtifactMarker(testHash("new-db")))
+	writeTestDatabaseBinaries(t, filepath.Join(home, "postgres", "16.13.0"))
+
+	if installedPackagesUsable(home, manifest) {
+		t.Fatal("installedPackagesUsable() accepted an installation with missing services")
 	}
 }
 
@@ -166,6 +180,17 @@ func writeTestExecutable(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte("test executable"), 0o700); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeTestDatabaseBinaries(t *testing.T, root string) {
+	t.Helper()
+	suffix := ""
+	if runtime.GOOS == "windows" {
+		suffix = ".exe"
+	}
+	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
+		writeTestExecutable(t, filepath.Join(root, "bin", name+suffix))
 	}
 }
 

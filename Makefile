@@ -1,4 +1,4 @@
-VERSION ?= 0.1.2
+VERSION ?= 0.1.3
 MANIFEST_URL ?= https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json
 DIST ?= dist
 LDFLAGS := -s -w -X main.launcherVersion=$(VERSION) -X main.defaultManifestURL=$(MANIFEST_URL)

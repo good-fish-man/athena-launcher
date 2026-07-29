@@ -10,7 +10,7 @@ on:
       launcher_tag:
         description: Launcher release receiving the manifest and PostgreSQL assets
         required: true
-        default: v0.1.2
+        default: v0.1.3
       postgres_version:
         description: PostgreSQL binary version
         required: true

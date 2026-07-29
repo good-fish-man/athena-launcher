@@ -27,7 +27,7 @@ const (
 
 // Release metadata can be injected at build time with -ldflags.
 var (
-	launcherVersion    = "0.1.2"
+	launcherVersion    = "0.1.3"
 	defaultManifestURL = publicManifestURL
 )
 

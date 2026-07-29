@@ -130,7 +130,7 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 	tracker.complete("manifest", fmt.Sprintf("Release %s verified for %s", manifest.Version, platformKey()))
 	if updates := checkPackageUpdates(opts.home, manifest); len(updates) > 0 && control != nil && !updateApproved {
 		installedManifest, installedErr := loadInstalledManifest(opts.home)
-		canDefer := installedErr == nil
+		canDefer := installedErr == nil && installedPackagesUsable(opts.home, installedManifest)
 		tracker.offerUpdate(updates, canDefer)
 		var dismissUpdate <-chan struct{}
 		if canDefer {

@@ -94,6 +94,42 @@ func loadInstalledManifest(home string) (*Manifest, error) {
 	return &manifest, nil
 }
 
+func installedPackagesUsable(home string, manifest *Manifest) bool {
+	if manifest == nil {
+		return false
+	}
+	platform := platformKey()
+	databaseArtifact := manifest.Database.Artifacts[platform]
+	databaseRoot := findArtifactRootByMarker(filepath.Join(home, "postgres"), databaseArtifactMarker(databaseArtifact.SHA256))
+	if databaseRoot == "" {
+		return false
+	}
+	if err := newManagedDatabase(home, databaseRoot, manifest.Database.BinDir, "").validateBinaries(); err != nil {
+		return false
+	}
+	for _, service := range manifest.Services {
+		artifact := service.Artifacts[platform]
+		root := findArtifactRootByMarker(filepath.Join(home, "services", service.Name), artifact.SHA256)
+		if root == "" {
+			return false
+		}
+		if _, err := findInstalledExecutable(root, filepath.Base(filepath.FromSlash(artifact.Executable))); err != nil {
+			return false
+		}
+	}
+	if manifest.Frontend != nil {
+		artifact := manifest.Frontend.Artifacts[platform]
+		root := findArtifactRootByMarker(filepath.Join(home, "frontend"), artifact.SHA256)
+		if root == "" {
+			return false
+		}
+		if _, err := os.Stat(filepath.Join(frontendRoot(root, manifest.Frontend.Root), "index.html")); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func shortHash(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) > 12 {
