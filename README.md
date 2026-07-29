@@ -172,7 +172,7 @@ Build all launcher binaries:
 
 ```bash
 make release VERSION=0.1.1 \
-  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/download/v0.1.1/release-manifest.json
+  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json
 ```
 
 Build desktop formats with the scripts in `packaging/macos`, `packaging/windows`, and `packaging/linux`, or run the repository's `Release` GitHub Actions workflow.

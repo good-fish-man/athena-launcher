@@ -172,7 +172,7 @@ make build
 
 ```bash
 make release VERSION=0.1.1 \
-  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/download/v0.1.1/release-manifest.json
+  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json
 ```
 
 桌面格式由 `packaging/macos`、`packaging/windows` 和 `packaging/linux` 中的脚本构建，也可直接运行仓库的 `Release` GitHub Actions 工作流。

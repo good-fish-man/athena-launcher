@@ -54,7 +54,7 @@ jobs:
           name="athena-launcher_${RELEASE_TAG}_${GOOS}_${GOARCH}$extension"
           mkdir -p dist
           version="${RELEASE_TAG#v}"
-          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/release-manifest.json"
+          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/$name" .
       - uses: actions/upload-artifact@v7
         with:
@@ -82,7 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/release-manifest.json"
+          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           mkdir -p dist/bin
           go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
           BINARY="dist/bin/athena-launcher-${GOARCH}" VERSION="$version" ARCH="$GOARCH" ./packaging/macos/package-dmg.sh
@@ -105,7 +105,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $version = $env:RELEASE_TAG.TrimStart("v")
-          $manifestUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/release-manifest.json"
+          $manifestUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/release-manifest.json"
           New-Item -ItemType Directory -Force -Path dist/bin, dist/installers | Out-Null
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
@@ -153,7 +153,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/release-manifest.json"
+          manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           mkdir -p dist/bin
           go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
       - name: Build AppImage
