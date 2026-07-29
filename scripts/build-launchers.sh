@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${VERSION:-0.1.0}
+VERSION=${VERSION:-0.1.1}
 DIST=${DIST:-dist}
 MANIFEST_URL=${MANIFEST_URL:-}
 OUTPUT="$ROOT/$DIST/launchers"

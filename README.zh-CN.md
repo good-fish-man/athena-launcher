@@ -171,8 +171,8 @@ make build
 构建全部平台单文件：
 
 ```bash
-make release VERSION=0.1.0 \
-  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/download/v0.1.0/release-manifest.json
+make release VERSION=0.1.1 \
+  MANIFEST_URL=https://github.com/good-fish-man/athena-launcher/releases/download/v0.1.1/release-manifest.json
 ```
 
 桌面格式由 `packaging/macos`、`packaging/windows` 和 `packaging/linux` 中的脚本构建，也可直接运行仓库的 `Release` GitHub Actions 工作流。

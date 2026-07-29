@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Athena release tag
+        description: Athena release tag, for example v0.1.1
         required: true
-        default: v0.1.0
+        default: v0.1.1
       postgres_version:
         description: PostgreSQL binary version
         required: true

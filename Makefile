@@ -1,4 +1,4 @@
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1
 MANIFEST_URL ?=
 DIST ?= dist
 LDFLAGS := -s -w -X main.launcherVersion=$(VERSION) -X main.defaultManifestURL=$(MANIFEST_URL)

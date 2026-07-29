@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-TAG=${TAG:-v0.1.0}
+TAG=${TAG:-v0.1.1}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
