@@ -4,12 +4,14 @@ set -eu
 TAG=${TAG:-v0.1.1}
 LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
+AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.33.1}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
 RUNTIME_REPO=${RUNTIME_REPO:-good-fish-man/agent-runtime}
 CLIENT_REPO=${CLIENT_REPO:-good-fish-man/agent-runtime-client}
 FRONTEND_REPO=${FRONTEND_REPO:-good-fish-man/athena-agent-ui}
 LAUNCHER_REPO=${LAUNCHER_REPO:-good-fish-man/athena-launcher}
+AGENT_BROWSER_REPO=${AGENT_BROWSER_REPO:-vercel-labs/agent-browser}
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2
@@ -49,12 +51,18 @@ postgres_linux_arm64="postgres_${POSTGRES_VERSION}_linux_arm64.tar.gz"
 postgres_linux_amd64="postgres_${POSTGRES_VERSION}_linux_amd64.tar.gz"
 postgres_windows_amd64="postgres_${POSTGRES_VERSION}_windows_amd64.tar.gz"
 frontend_asset="athena-agent-ui_${TAG}.tar.gz"
+browser_darwin_arm64="agent-browser-darwin-arm64"
+browser_darwin_amd64="agent-browser-darwin-x64"
+browser_linux_arm64="agent-browser-linux-arm64"
+browser_linux_amd64="agent-browser-linux-x64"
+browser_windows_amd64="agent-browser-win32-x64.exe"
 
 for asset in \
   "$runtime_darwin_arm64" "$runtime_darwin_amd64" "$runtime_linux_arm64" "$runtime_linux_amd64" "$runtime_windows_amd64" \
   "$client_darwin_arm64" "$client_darwin_amd64" "$client_linux_arm64" "$client_linux_amd64" "$client_windows_amd64" \
   "$postgres_darwin_arm64" "$postgres_darwin_amd64" "$postgres_linux_arm64" "$postgres_linux_amd64" "$postgres_windows_amd64" \
-  "$frontend_asset"
+  "$frontend_asset" \
+  "$browser_darwin_arm64" "$browser_darwin_amd64" "$browser_linux_arm64" "$browser_linux_amd64" "$browser_windows_amd64"
 do
   require_asset "$asset"
 done
@@ -70,6 +78,7 @@ jq -n \
   --arg version "${TAG#v}" \
   --arg tag "$TAG" \
   --arg postgres_version "$POSTGRES_VERSION" \
+  --arg browser_version "$AGENT_BROWSER_VERSION" \
   --arg p_da_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_darwin_arm64")" --arg p_da_sha "$(sha256 "$ASSET_DIR/$postgres_darwin_arm64")" \
   --arg p_dx_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_darwin_amd64")" --arg p_dx_sha "$(sha256 "$ASSET_DIR/$postgres_darwin_amd64")" \
   --arg p_la_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "$postgres_linux_arm64")" --arg p_la_sha "$(sha256 "$ASSET_DIR/$postgres_linux_arm64")" \
@@ -86,6 +95,11 @@ jq -n \
   --arg c_lx_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_linux_amd64")" --arg c_lx_sha "$(sha256 "$ASSET_DIR/$client_linux_amd64")" \
   --arg c_wx_url "$(release_url "$CLIENT_REPO" "$TAG" "$client_windows_amd64")" --arg c_wx_sha "$(sha256 "$ASSET_DIR/$client_windows_amd64")" \
   --arg frontend_url "$(release_url "$FRONTEND_REPO" "$TAG" "$frontend_asset")" --arg frontend_sha "$(sha256 "$ASSET_DIR/$frontend_asset")" \
+  --arg b_da_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_darwin_arm64")" --arg b_da_sha "$(sha256 "$ASSET_DIR/$browser_darwin_arm64")" \
+  --arg b_dx_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_darwin_amd64")" --arg b_dx_sha "$(sha256 "$ASSET_DIR/$browser_darwin_amd64")" \
+  --arg b_la_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_linux_arm64")" --arg b_la_sha "$(sha256 "$ASSET_DIR/$browser_linux_arm64")" \
+  --arg b_lx_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_linux_amd64")" --arg b_lx_sha "$(sha256 "$ASSET_DIR/$browser_linux_amd64")" \
+  --arg b_wx_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_windows_amd64")" --arg b_wx_sha "$(sha256 "$ASSET_DIR/$browser_windows_amd64")" \
   '{
     version: $version,
     database: {
@@ -97,6 +111,16 @@ jq -n \
         "linux-arm64": {url: $p_la_url, sha256: $p_la_sha, format: "tar.gz", executable: ""},
         "linux-amd64": {url: $p_lx_url, sha256: $p_lx_sha, format: "tar.gz", executable: ""},
         "windows-amd64": {url: $p_wx_url, sha256: $p_wx_sha, format: "tar.gz", executable: ""}
+      }
+    },
+    browser: {
+      version: $browser_version,
+      artifacts: {
+        "darwin-arm64": {url: $b_da_url, sha256: $b_da_sha, format: "raw", executable: "agent-browser"},
+        "darwin-amd64": {url: $b_dx_url, sha256: $b_dx_sha, format: "raw", executable: "agent-browser"},
+        "linux-arm64": {url: $b_la_url, sha256: $b_la_sha, format: "raw", executable: "agent-browser"},
+        "linux-amd64": {url: $b_lx_url, sha256: $b_lx_sha, format: "raw", executable: "agent-browser"},
+        "windows-amd64": {url: $b_wx_url, sha256: $b_wx_sha, format: "raw", executable: "agent-browser.exe"}
       }
     },
     frontend: {

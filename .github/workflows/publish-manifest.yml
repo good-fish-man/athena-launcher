@@ -15,6 +15,10 @@ on:
         description: PostgreSQL binary version
         required: true
         default: 16.13.0
+      agent_browser_version:
+        description: Upstream agent-browser version
+        required: true
+        default: 0.33.1
 
 permissions:
   contents: write
@@ -24,6 +28,7 @@ env:
   SERVICE_TAG: ${{ inputs.tag }}
   LAUNCHER_TAG: ${{ inputs.launcher_tag }}
   POSTGRES_VERSION: ${{ inputs.postgres_version }}
+  AGENT_BROWSER_VERSION: ${{ inputs.agent_browser_version }}
 
 jobs:
   prerequisites:
@@ -93,6 +98,7 @@ jobs:
           gh release download "$SERVICE_TAG" --repo good-fish-man/agent-runtime --pattern "agent-runtime_${SERVICE_TAG}_*" --dir release-assets
           gh release download "$SERVICE_TAG" --repo good-fish-man/agent-runtime-client --pattern "agent-runtime-client_${SERVICE_TAG}_*" --dir release-assets
           gh release download "$SERVICE_TAG" --repo good-fish-man/athena-agent-ui --pattern "athena-agent-ui_${SERVICE_TAG}.tar.gz" --dir release-assets
+          gh release download "v$AGENT_BROWSER_VERSION" --repo vercel-labs/agent-browser --pattern "agent-browser-darwin-arm64" --pattern "agent-browser-darwin-x64" --pattern "agent-browser-linux-arm64" --pattern "agent-browser-linux-x64" --pattern "agent-browser-win32-x64.exe" --dir release-assets
       - name: Generate signed-by-checksum manifest
         env:
           ASSET_DIR: release-assets

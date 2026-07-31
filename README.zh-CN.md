@@ -9,7 +9,7 @@ Launcher 本身只使用 Go 标准库，可以编译为单个可执行文件。
 ## 管理的内容
 
 - 自动识别 macOS、Linux、Windows 和 `amd64`/`arm64`。
-- 下载当前平台的 PostgreSQL、Agent Runtime、Agent Runtime Client 和 Athena Agent UI。
+- 下载当前平台的 PostgreSQL、Agent Browser、Agent Runtime、Agent Runtime Client 和 Athena Agent UI。
 - 使用 `release-manifest.json` 中的 SHA-256 校验所有产物。
 - 在 `~/.athena` 初始化 PostgreSQL，随机生成密码并创建 `agent_runtime` 数据库。
 - 自动生成匹配的 Runtime、Client 和 Skills 配置。
@@ -42,7 +42,7 @@ flowchart TD
 
 1. 读取发布清单，并验证当前平台是否有可用产物。
 2. 下载缺失或变化的包并校验 SHA-256。
-3. 创建或复用本地 PostgreSQL 数据目录和凭据。
+3. 安装可选的原生 Agent Browser，并创建或复用本地 PostgreSQL 数据目录和凭据。
 4. 生成服务配置，不覆盖数据库数据目录。
 5. 依次启动 PostgreSQL、Runtime、Client 和 UI。
 6. 等待所有健康检查通过，然后进入 Athena。
@@ -179,7 +179,7 @@ make release VERSION=0.1.3 \
 
 ## Release Manifest
 
-[`release-manifest.example.json`](release-manifest.example.json) 展示了完整结构。数据库、前端和服务产物需要声明：
+[`release-manifest.example.json`](release-manifest.example.json) 展示了完整结构。数据库、可选浏览器、前端和服务产物需要声明：
 
 - `darwin-arm64`、`windows-amd64` 等平台 Key。
 - HTTPS 下载地址。

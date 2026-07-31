@@ -127,6 +127,42 @@ func installDatabase(ctx context.Context, home string, manifest *Manifest) (stri
 	return target, nil
 }
 
+func installBrowser(ctx context.Context, home string, manifest *Manifest, state *launcherState) (string, error) {
+	if manifest.Browser == nil {
+		return "", nil
+	}
+	artifact := manifest.Browser.Artifacts[platformKey()]
+	browserRoot := filepath.Join(home, "browser")
+	target := filepath.Join(browserRoot, manifest.Browser.Version)
+	executable := filepath.Join(target, filepath.FromSlash(artifact.Executable))
+	marker := filepath.Join(target, ".artifact-sha256")
+	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
+		if _, err := os.Stat(executable); err == nil {
+			return executable, nil
+		}
+	}
+	if existing := findArtifactRootByMarker(browserRoot, artifact.SHA256); existing != "" {
+		existingExecutable, err := findInstalledExecutable(existing, filepath.Base(filepath.FromSlash(artifact.Executable)))
+		if err == nil {
+			state.Installed["agent-browser"] = filepath.Base(existing)
+			fmt.Printf("[agent-browser] reusing verified package %s\n", shortHash(artifact.SHA256))
+			return existingExecutable, nil
+		}
+	}
+	fmt.Printf("[agent-browser] downloading %s for %s\n", manifest.Browser.Version, platformKey())
+	if err := installArtifact(ctx, home, target, artifact); err != nil {
+		return "", fmt.Errorf("install agent-browser: %w", err)
+	}
+	if err := os.WriteFile(marker, []byte(strings.ToLower(artifact.SHA256)+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(executable, 0o755); err != nil {
+		return "", fmt.Errorf("make %s executable: %w", executable, err)
+	}
+	state.Installed["agent-browser"] = manifest.Browser.Version
+	return executable, saveState(home, state)
+}
+
 func databaseArtifactMarker(checksum string) string {
 	return databaseArtifactMarkerVersion + ":" + strings.ToLower(strings.TrimSpace(checksum))
 }

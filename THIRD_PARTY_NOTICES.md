@@ -7,6 +7,7 @@ Athena Launcher is licensed under the Apache License 2.0. That license covers th
 | Component | Upstream | License source |
 | --- | --- | --- |
 | PostgreSQL | https://www.postgresql.org/ | https://www.postgresql.org/about/licence/ |
+| agent-browser | https://github.com/vercel-labs/agent-browser | The upstream `LICENSE` distributed with that release |
 | Athena Agent Runtime | https://github.com/good-fish-man/agent-runtime | The `LICENSE`, `NOTICE`, and third-party notices in that release |
 | Athena Agent Runtime Client | https://github.com/good-fish-man/agent-runtime-client | The `LICENSE`, `NOTICE`, and third-party notices in that release |
 | Athena Agent UI | https://github.com/good-fish-man/athena-agent-ui | The `LICENSE`, `NOTICE`, and third-party notices in that release |

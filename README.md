@@ -9,7 +9,7 @@ The launcher itself uses only the Go standard library and builds as a single exe
 ## What It Manages
 
 - Detects macOS, Linux, or Windows and `amd64`/`arm64` automatically.
-- Downloads PostgreSQL, Agent Runtime, Agent Runtime Client, and Athena Agent UI for the current platform.
+- Downloads PostgreSQL, Agent Browser, Agent Runtime, Agent Runtime Client, and Athena Agent UI for the current platform.
 - Verifies every artifact against its SHA-256 value in `release-manifest.json`.
 - Initializes PostgreSQL in `~/.athena` with a random password and creates the `agent_runtime` database.
 - Generates matching Runtime, Client, and Skills configuration files.
@@ -42,7 +42,7 @@ Startup sequence:
 
 1. Load and validate the release manifest for the detected platform.
 2. Download missing/changed packages and verify SHA-256.
-3. Generate or reuse the local PostgreSQL cluster and credentials.
+3. Install the optional native Agent Browser and generate or reuse the local PostgreSQL cluster and credentials.
 4. Generate service configuration without overwriting the database data directory.
 5. Start PostgreSQL, Runtime, Client, then the UI.
 6. Wait for health checks and open Athena when every component is ready.
@@ -179,7 +179,7 @@ Build desktop formats with the scripts in `packaging/macos`, `packaging/windows`
 
 ## Release Manifest
 
-[`release-manifest.example.json`](release-manifest.example.json) documents the schema. Each database, frontend, and service artifact declares:
+[`release-manifest.example.json`](release-manifest.example.json) documents the schema. Each database, optional browser, frontend, and service artifact declares:
 
 - Platform key such as `darwin-arm64` or `windows-amd64`.
 - HTTPS URL.

@@ -34,8 +34,14 @@ var (
 type Manifest struct {
 	Version  string        `json:"version"`
 	Database DatabaseSpec  `json:"database"`
+	Browser  *BrowserSpec  `json:"browser,omitempty"`
 	Services []ServiceSpec `json:"services"`
 	Frontend *FrontendSpec `json:"frontend,omitempty"`
+}
+
+type BrowserSpec struct {
+	Version   string              `json:"version"`
+	Artifacts map[string]Artifact `json:"artifacts"`
 }
 
 type FrontendSpec struct {
@@ -134,6 +140,23 @@ func (m *Manifest) validate() error {
 	for platform, artifact := range m.Database.Artifacts {
 		if err := validateArtifact(artifact, false); err != nil {
 			return fmt.Errorf("database artifact for %s: %w", platform, err)
+		}
+	}
+	if m.Browser != nil {
+		if strings.TrimSpace(m.Browser.Version) == "" {
+			return fmt.Errorf("manifest browser version is required")
+		}
+		artifact, ok := m.Browser.Artifacts[key]
+		if !ok {
+			return fmt.Errorf("browser does not provide an artifact for %s", key)
+		}
+		if err := validateArtifact(artifact, true); err != nil {
+			return fmt.Errorf("browser artifact for %s: %w", key, err)
+		}
+		for platform, candidate := range m.Browser.Artifacts {
+			if err := validateArtifact(candidate, true); err != nil {
+				return fmt.Errorf("browser artifact for %s: %w", platform, err)
+			}
 		}
 	}
 	if err := validateRelativePath(m.Database.BinDir, true); err != nil {

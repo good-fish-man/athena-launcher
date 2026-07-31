@@ -28,6 +28,10 @@ func checkPackageUpdates(home string, manifest *Manifest) []packageUpdate {
 	updates := make([]packageUpdate, 0)
 	databaseArtifact := manifest.Database.Artifacts[platform]
 	updates = appendPackageUpdate(updates, "postgres", "PostgreSQL", filepath.Join(home, "postgres"), databaseArtifactMarker(databaseArtifact.SHA256))
+	if manifest.Browser != nil {
+		artifact := manifest.Browser.Artifacts[platform]
+		updates = appendPackageUpdate(updates, "agent-browser", "Agent Browser", filepath.Join(home, "browser"), artifact.SHA256)
+	}
 	for _, service := range manifest.Services {
 		artifact := service.Artifacts[platform]
 		updates = appendPackageUpdate(updates, service.Name, service.Name, filepath.Join(home, "services", service.Name), artifact.SHA256)
@@ -106,6 +110,16 @@ func installedPackagesUsable(home string, manifest *Manifest) bool {
 	}
 	if err := newManagedDatabase(home, databaseRoot, manifest.Database.BinDir, "").validateBinaries(); err != nil {
 		return false
+	}
+	if manifest.Browser != nil {
+		artifact := manifest.Browser.Artifacts[platform]
+		root := findArtifactRootByMarker(filepath.Join(home, "browser"), artifact.SHA256)
+		if root == "" {
+			return false
+		}
+		if _, err := findInstalledExecutable(root, filepath.Base(filepath.FromSlash(artifact.Executable))); err != nil {
+			return false
+		}
 	}
 	for _, service := range manifest.Services {
 		artifact := service.Artifacts[platform]

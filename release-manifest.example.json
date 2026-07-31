@@ -11,6 +11,16 @@
       "windows-amd64": { "url": "https://releases.example.com/athena/postgres-16.4-windows-amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" }
     }
   },
+  "browser": {
+    "version": "0.33.1",
+    "artifacts": {
+      "darwin-arm64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-darwin-arm64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
+      "darwin-amd64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-darwin-x64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
+      "linux-amd64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-linux-x64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
+      "linux-arm64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-linux-arm64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
+      "windows-amd64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-win32-x64.exe", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser.exe" }
+    }
+  },
   "frontend": {
     "listen_addr": "127.0.0.1:3000",
     "root": "",

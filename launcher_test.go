@@ -44,6 +44,12 @@ func TestManifestValidation(t *testing.T) {
 	if err := manifest.validate(); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
 	}
+	manifest.Browser = &BrowserSpec{Version: "0.33.1", Artifacts: map[string]Artifact{
+		platformKey(): {URL: "https://downloads.example/agent-browser", SHA256: checksum, Format: "raw", Executable: "agent-browser"},
+	}}
+	if err := manifest.validate(); err != nil {
+		t.Fatalf("manifest with browser artifact rejected: %v", err)
+	}
 	manifest.Database.Artifacts["test-missing-url"] = Artifact{SHA256: checksum, Format: "tar.gz"}
 	if err := manifest.validate(); err == nil {
 		t.Fatal("artifact without a URL was accepted")
@@ -199,6 +205,33 @@ func TestInstallRawArtifactAndChecksum(t *testing.T) {
 	artifact.SHA256 = strings.Repeat("0", 64)
 	if err := installArtifact(context.Background(), home, target, artifact); err == nil {
 		t.Fatal("checksum mismatch was accepted")
+	}
+}
+
+func TestInstallBrowserUsesVerifiedRawArtifact(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, "agent-browser-source")
+	content := []byte("fake browser binary")
+	if err := os.WriteFile(source, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	manifest := &Manifest{Browser: &BrowserSpec{
+		Version: "0.33.1",
+		Artifacts: map[string]Artifact{platformKey(): {
+			URL: source, SHA256: hex.EncodeToString(sum[:]), Format: "raw", Executable: "agent-browser",
+		}},
+	}}
+	state := &launcherState{Installed: make(map[string]string), DBPassword: "test"}
+	executable, err := installBrowser(context.Background(), home, manifest, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executable != filepath.Join(home, "browser", "0.33.1", "agent-browser") {
+		t.Fatalf("installed executable = %q", executable)
+	}
+	if state.Installed["agent-browser"] != "0.33.1" {
+		t.Fatalf("browser version was not saved: %+v", state.Installed)
 	}
 }
 

@@ -57,6 +57,19 @@ func TestCheckPackageUpdatesIgnoresMissingAndMatchingPackages(t *testing.T) {
 	}
 }
 
+func TestCheckPackageUpdatesIncludesBrowserArtifact(t *testing.T) {
+	home := t.TempDir()
+	manifest := updateTestManifest()
+	manifest.Browser = &BrowserSpec{Version: "0.33.1", Artifacts: map[string]Artifact{
+		platformKey(): {URL: "https://downloads.example/agent-browser", SHA256: testHash("new-browser"), Executable: "agent-browser"},
+	}}
+	writeArtifactMarker(t, filepath.Join(home, "browser", "0.32.0"), testHash("old-browser"))
+	updates := checkPackageUpdates(home, manifest)
+	if len(updates) != 1 || updates[0].Component != "agent-browser" {
+		t.Fatalf("browser update was not detected: %+v", updates)
+	}
+}
+
 func TestFindVerifiedArtifactForCrossVersionReuse(t *testing.T) {
 	root := t.TempDir()
 	installed := filepath.Join(root, "0.1.0")

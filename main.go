@@ -155,13 +155,28 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 	}
 	tracker.complete("database-package", fmt.Sprintf("PostgreSQL %s is available", manifest.Database.Version))
 
+	tracker.begin("browser-package", "Checking the authenticated browser package")
+	browserExecutable, err := installBrowser(ctx, opts.home, manifest, state)
+	if err != nil {
+		tracker.fail("browser-package", err)
+		return nil, nil, nil, err
+	}
+	if browserExecutable == "" {
+		tracker.complete("browser-package", "Using agent-browser from PATH when available")
+	} else {
+		tracker.complete("browser-package", fmt.Sprintf("Agent Browser %s is available", manifest.Browser.Version))
+	}
+
 	tracker.begin("services-package", "Checking Agent Runtime packages")
 	executables, err := installServices(ctx, opts.home, manifest, state)
 	if err != nil {
 		tracker.fail("services-package", err)
 		return nil, nil, nil, err
 	}
-	tracker.complete("services-package", fmt.Sprintf("%d runtime packages are available", len(executables)))
+	tracker.complete("services-package", fmt.Sprintf("%d runtime packages are available", len(manifest.Services)))
+	if browserExecutable != "" {
+		executables["agent-browser"] = browserExecutable
+	}
 
 	tracker.begin("frontend-package", "Checking the Athena interface package")
 	if _, err := installFrontend(ctx, opts.home, manifest, state); err != nil {

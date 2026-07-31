@@ -121,6 +121,9 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) (returnErr err
 	switch spec.Name {
 	case "agent-runtime":
 		env = append(env, "AGENT_RUNTIME_CONFIG="+s.paths.runtimeConfig)
+		if browserExecutable := s.executables["agent-browser"]; browserExecutable != "" {
+			env = append(env, "ATHENA_AGENT_BROWSER_BIN="+browserExecutable)
+		}
 	case "agent-runtime-client":
 		if len(args) == 0 {
 			args = []string{"--config", s.paths.clientConfig}

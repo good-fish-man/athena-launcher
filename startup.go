@@ -81,6 +81,7 @@ func (t *startupTracker) reset() {
 		Steps: []startupStep{
 			{ID: "manifest", Label: "Release manifest", Status: "pending"},
 			{ID: "database-package", Label: "PostgreSQL package", Status: "pending"},
+			{ID: "browser-package", Label: "Authenticated browser", Status: "pending"},
 			{ID: "services-package", Label: "Runtime packages", Status: "pending"},
 			{ID: "frontend-package", Label: "Athena interface", Status: "pending"},
 			{ID: "configuration", Label: "Service configuration", Status: "pending"},
