@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -281,6 +283,57 @@ func TestManagedDatabaseRequiresOnlyEmbeddedServerBinaries(t *testing.T) {
 	database := newManagedDatabase(t.TempDir(), installDir, "bin", "secret")
 	if err := database.validateBinaries(); err != nil {
 		t.Fatalf("minimal embedded PostgreSQL package rejected: %v", err)
+	}
+}
+
+func TestManagedServicePorts(t *testing.T) {
+	manifest := &Manifest{Services: []ServiceSpec{
+		{Name: "agent-runtime"},
+		{Name: "agent-runtime-client"},
+		{Name: "agent-browser"},
+	}}
+	ports := managedServicePorts(manifest)
+	got := make(map[string]bool)
+	for _, port := range ports {
+		got[port.Service+":"+port.Reason+":"+strconv.Itoa(port.Port)] = true
+	}
+	for _, want := range []string{
+		"agent-runtime:gRPC:18080",
+		"agent-runtime:health:18081",
+		"agent-runtime-client:HTTP/API:8090",
+	} {
+		if !got[want] {
+			t.Fatalf("managed service port %s missing from %+v", want, ports)
+		}
+	}
+	if len(ports) != 3 {
+		t.Fatalf("managedServicePorts() returned extra ports: %+v", ports)
+	}
+}
+
+func TestPortAvailableDetectsWildcardListener(t *testing.T) {
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	if portAvailable(uint32(port)) {
+		t.Fatalf("portAvailable(%d) returned true while wildcard listener is active", port)
+	}
+}
+
+func TestAthenaManagedProcessDetection(t *testing.T) {
+	home := filepath.Join(t.TempDir(), ".athena")
+	servicePath := filepath.Join(home, "services", "agent-runtime", "0.1.3", "agent-runtime")
+	if !isAthenaManagedProcess(home, "agent-runtime", portOwner{PID: 42, Command: "agent-runtime", Args: servicePath}) {
+		t.Fatal("installed Athena service process was not recognized")
+	}
+	if !isAthenaManagedProcess(home, "agent-runtime", portOwner{PID: 43, Command: "___go_build_agent_runtime", Args: ""}) {
+		t.Fatal("Go development runtime process was not recognized")
+	}
+	if isAthenaManagedProcess(home, "agent-runtime", portOwner{PID: 44, Command: "postgres", Args: "/usr/local/bin/postgres"}) {
+		t.Fatal("unrelated process was incorrectly recognized as Athena-managed")
 	}
 }
 

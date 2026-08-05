@@ -43,6 +43,12 @@ runtime:
   request_timeout_sec: 120
   dial_timeout_sec: 10
 
+control:
+  device_token: %s
+
+scheduled_task:
+  scan_interval_sec: 60
+
 log:
   level: "info"
 
@@ -64,7 +70,7 @@ paths:
   app_config_file: %s
   skills_config_file: %s
   uploads_dir: %s
-`, defaultClientHTTPPort, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort,
+`, defaultClientHTTPPort, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort, yamlString(state.InternalServiceToken),
 		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), defaultDatabasePort, yamlString(defaultDatabaseName),
 		yamlString(paths.clientConfig), yamlString(paths.skillsConfig), yamlString(uploadsDir))
 	runtimeYAML := fmt.Sprintf(`server:

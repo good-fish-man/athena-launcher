@@ -131,6 +131,9 @@ func installBrowser(ctx context.Context, home string, manifest *Manifest, state 
 	if manifest.Browser == nil {
 		return "", nil
 	}
+	if state != nil && state.Installed == nil {
+		state.Installed = map[string]string{}
+	}
 	artifact := manifest.Browser.Artifacts[platformKey()]
 	browserRoot := filepath.Join(home, "browser")
 	target := filepath.Join(browserRoot, manifest.Browser.Version)
@@ -144,7 +147,9 @@ func installBrowser(ctx context.Context, home string, manifest *Manifest, state 
 	if existing := findArtifactRootByMarker(browserRoot, artifact.SHA256); existing != "" {
 		existingExecutable, err := findInstalledExecutable(existing, filepath.Base(filepath.FromSlash(artifact.Executable)))
 		if err == nil {
-			state.Installed["agent-browser"] = filepath.Base(existing)
+			if state != nil {
+				state.Installed["agent-browser"] = filepath.Base(existing)
+			}
 			fmt.Printf("[agent-browser] reusing verified package %s\n", shortHash(artifact.SHA256))
 			return existingExecutable, nil
 		}
@@ -159,7 +164,9 @@ func installBrowser(ctx context.Context, home string, manifest *Manifest, state 
 	if err := os.Chmod(executable, 0o755); err != nil {
 		return "", fmt.Errorf("make %s executable: %w", executable, err)
 	}
-	state.Installed["agent-browser"] = manifest.Browser.Version
+	if state != nil {
+		state.Installed["agent-browser"] = manifest.Browser.Version
+	}
 	return executable, saveState(home, state)
 }
 

@@ -24,7 +24,7 @@ func main() {
 }
 
 func run(args []string) error {
-	command := "start"
+	command := defaultCommand()
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		command, args = args[0], args[1:]
 	}
@@ -36,6 +36,7 @@ func run(args []string) error {
 	flags.SetOutput(os.Stderr)
 	homeFlag := flags.String("home", home, "Athena data and installation directory")
 	manifestFlag := flags.String("manifest", "", "release manifest file or HTTPS URL")
+	frontendFlag := flags.String("frontend-dir", os.Getenv("ATHENA_FRONTEND_DIR"), "local Athena UI dist directory (development only)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -47,7 +48,11 @@ func run(args []string) error {
 	if manifestSource == "" {
 		manifestSource = defaultManifest(absHome)
 	}
-	opts := options{command: command, home: absHome, manifestSource: manifestSource}
+	frontendDir, err := normalizeFrontendOverride(*frontendFlag)
+	if err != nil {
+		return err
+	}
+	opts := options{command: command, home: absHome, manifestSource: manifestSource, frontendDir: frontendDir}
 
 	switch command {
 	case "launch":
@@ -82,32 +87,15 @@ func run(args []string) error {
 	}
 }
 
-func launchDesktop(opts options) error {
-	startupAddress := fmt.Sprintf("http://127.0.0.1:%d/", defaultStartupPort)
-	if startupCenterHealthy() {
-		requestStartupUpdateCheck()
-		return openBrowser(startupAddress)
-	}
-	if err := startDetached(opts); err != nil {
-		return err
-	}
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if startupCenterHealthy() {
-			return openBrowser(startupAddress)
-		}
-		select {
-		case <-deadline.C:
-			return fmt.Errorf("Athena startup center did not open within 30 seconds; inspect %s", filepath.Join(opts.home, "logs", "launcher.log"))
-		case <-ticker.C:
-		}
-	}
-}
-
 func prepare(ctx context.Context, opts options) (*Manifest, *launcherState, map[string]string, error) {
+	state, err := loadState(opts.home)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if deploymentFromState(state).Mode == connectionModeRemote {
+		manifest, _, err := prepareRemote(ctx, opts, nil, nil, true, state)
+		return manifest, state, map[string]string{}, err
+	}
 	return prepareWithTracker(ctx, opts, nil, nil, true)
 }
 
@@ -128,7 +116,7 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 		return nil, nil, nil, err
 	}
 	tracker.complete("manifest", fmt.Sprintf("Release %s verified for %s", manifest.Version, platformKey()))
-	if updates := checkPackageUpdates(opts.home, manifest); len(updates) > 0 && control != nil && !updateApproved {
+	if updates := packageUpdatesForOptions(opts, manifest); len(updates) > 0 && control != nil && !updateApproved {
 		installedManifest, installedErr := loadInstalledManifest(opts.home)
 		canDefer := installedErr == nil && installedPackagesUsable(opts.home, installedManifest)
 		tracker.offerUpdate(updates, canDefer)
@@ -179,11 +167,15 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 	}
 
 	tracker.begin("frontend-package", "Checking the Athena interface package")
-	if _, err := installFrontend(ctx, opts.home, manifest, state); err != nil {
-		tracker.fail("frontend-package", err)
-		return nil, nil, nil, err
+	if opts.frontendDir != "" {
+		tracker.complete("frontend-package", fmt.Sprintf("Using local interface at %s", opts.frontendDir))
+	} else {
+		if _, err := installFrontend(ctx, opts.home, manifest, state); err != nil {
+			tracker.fail("frontend-package", err)
+			return nil, nil, nil, err
+		}
+		tracker.complete("frontend-package", "Athena interface package is available")
 	}
-	tracker.complete("frontend-package", "Athena interface package is available")
 
 	tracker.begin("configuration", "Generating local service configuration")
 	if _, err := writeGeneratedConfigs(opts.home, state, executables); err != nil {
@@ -245,6 +237,13 @@ func runForeground(opts options) error {
 }
 
 func runManaged(ctx context.Context, opts options, tracker *startupTracker, control *startupController, updateApproved bool) error {
+	currentState, err := loadState(opts.home)
+	if err != nil {
+		return err
+	}
+	if deploymentFromState(currentState).Mode == connectionModeRemote {
+		return runRemoteManaged(ctx, opts, tracker, control, updateApproved, currentState)
+	}
 	manifest, state, executables, err := prepareWithTracker(ctx, opts, tracker, control, updateApproved)
 	if err != nil {
 		return err
@@ -284,13 +283,15 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 	if err != nil {
 		return err
 	}
-	supervisor := newSupervisor(opts.home, paths, manifest, executables, tracker)
+	supervisor := newSupervisor(opts.home, paths, manifest, executables, tracker, state.BrowserEncryptionKey, state.InternalServiceToken)
 	if err := supervisor.StartAll(ctx); err != nil {
 		return err
 	}
 	defer supervisor.StopAll()
 	frontendPath := ""
-	if manifest.Frontend != nil {
+	if opts.frontendDir != "" {
+		frontendPath = opts.frontendDir
+	} else if manifest.Frontend != nil {
 		frontendVersion := state.Installed["frontend"]
 		if frontendVersion == "" {
 			frontendVersion = manifest.Version
@@ -298,6 +299,28 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 		frontendPath = frontendRoot(filepath.Join(opts.home, "frontend", frontendVersion), manifest.Frontend.Root)
 	}
 	tracker.begin("frontend", "Starting the Athena interface")
+	if opts.desktop != nil {
+		if manifest.Frontend == nil {
+			err := errors.New("desktop mode requires an Athena interface package")
+			tracker.fail("frontend", err)
+			return err
+		}
+		if err := opts.desktop.UseFrontend(frontendPath); err != nil {
+			tracker.fail("frontend", err)
+			return err
+		}
+		tracker.complete("frontend", "Athena interface is loaded in the desktop window")
+		tracker.clearUpdate("All installed packages are current")
+		tracker.ready("/")
+		fmt.Println("Athena desktop is ready")
+		return supervisor.Run(ctx, control, func() ([]packageUpdate, error) {
+			remote, err := loadManifest(ctx, opts.manifestSource)
+			if err != nil {
+				return nil, err
+			}
+			return packageUpdatesForOptions(opts, remote), nil
+		})
+	}
 	frontend, err := startFrontendServer(manifest, frontendPath)
 	if err != nil {
 		tracker.fail("frontend", err)
@@ -329,7 +352,7 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 		if err != nil {
 			return nil, err
 		}
-		return checkPackageUpdates(opts.home, remote), nil
+		return packageUpdatesForOptions(opts, remote), nil
 	})
 }
 
@@ -351,7 +374,11 @@ func startDetached(opts options) error {
 	if err != nil {
 		return err
 	}
-	command := exec.Command(executable, "run", "--home", opts.home, "--manifest", opts.manifestSource)
+	commandArgs := []string{"run", "--home", opts.home, "--manifest", opts.manifestSource}
+	if opts.frontendDir != "" {
+		commandArgs = append(commandArgs, "--frontend-dir", opts.frontendDir)
+	}
+	command := exec.Command(executable, commandArgs...)
 	command.Stdout = logFile
 	command.Stderr = logFile
 	configureDetachedProcess(command)
@@ -401,11 +428,32 @@ func printStatus(home string) {
 		pid = state.LauncherPID
 	}
 	fmt.Printf("Version: %s\nLauncher PID: %d\n", version, pid)
+	selection := deploymentFromState(state)
+	if selection.Mode == connectionModeRemote {
+		remoteHealthy := healthyURL(selection.RemoteURL + "/healthz")
+		fmt.Println("Connection mode: remote")
+		fmt.Printf("Remote Runtime Client: %s (%s)\n", statusLabel(remoteHealthy), selection.RemoteURL)
+		fmt.Printf("Athena UI: %s (Wails desktop window)\n", statusLabel(pid > 0 && remoteHealthy))
+		return
+	}
+	fmt.Println("Connection mode: local")
+	runtimeHealthy := healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultRuntimeHTTPPort))
+	clientHealthy := healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort))
+	browserUI := healthyURL(fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort))
+	desktopUI := pid > 0 && clientHealthy && !browserUI
 	fmt.Printf("PostgreSQL: %s\n", statusLabel(tcpReachable(defaultDatabasePort)))
-	fmt.Printf("agent-runtime: %s\n", statusLabel(healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultRuntimeHTTPPort))))
-	fmt.Printf("agent-runtime-client: %s\n", statusLabel(healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort))))
-	fmt.Printf("Athena UI: %s\n", statusLabel(healthyURL(fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort))))
-	fmt.Printf("Startup Center: %s\n", statusLabel(startupCenterHealthy()))
+	fmt.Printf("agent-runtime: %s\n", statusLabel(runtimeHealthy))
+	fmt.Printf("agent-runtime-client: %s\n", statusLabel(clientHealthy))
+	if desktopUI {
+		fmt.Println("Athena UI: running (Wails desktop window)")
+	} else {
+		fmt.Printf("Athena UI: %s\n", statusLabel(browserUI))
+	}
+	if pid > 0 && !startupCenterHealthy() {
+		fmt.Println("Startup Center: embedded in desktop window")
+	} else {
+		fmt.Printf("Startup Center: %s\n", statusLabel(startupCenterHealthy()))
+	}
 }
 
 func watchStopRequest(ctx context.Context, cancel context.CancelFunc, path string) {

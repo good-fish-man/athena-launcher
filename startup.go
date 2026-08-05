@@ -26,15 +26,24 @@ type startupStep struct {
 }
 
 type startupSnapshot struct {
-	State       string        `json:"state"`
-	Message     string        `json:"message"`
-	Error       string        `json:"error,omitempty"`
-	Version     string        `json:"version"`
-	FrontendURL string        `json:"frontendUrl,omitempty"`
-	LogPath     string        `json:"logPath"`
-	UpdatedAt   string        `json:"updatedAt"`
-	Steps       []startupStep `json:"steps"`
-	Update      startupUpdate `json:"update"`
+	State       string            `json:"state"`
+	Message     string            `json:"message"`
+	Error       string            `json:"error,omitempty"`
+	Version     string            `json:"version"`
+	FrontendURL string            `json:"frontendUrl,omitempty"`
+	LogPath     string            `json:"logPath"`
+	UpdatedAt   string            `json:"updatedAt"`
+	Steps       []startupStep     `json:"steps"`
+	Update      startupUpdate     `json:"update"`
+	Deployment  startupDeployment `json:"deployment"`
+}
+
+type startupDeployment struct {
+	Required    bool   `json:"required"`
+	Mode        string `json:"mode"`
+	RemoteURL   string `json:"remoteUrl,omitempty"`
+	DeviceToken string `json:"deviceToken,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type startupUpdate struct {
@@ -48,6 +57,7 @@ type startupController struct {
 	checkUpdate   chan struct{}
 	applyUpdate   chan struct{}
 	dismissUpdate chan struct{}
+	deployment    chan deploymentSelection
 }
 
 func newStartupController() *startupController {
@@ -55,6 +65,7 @@ func newStartupController() *startupController {
 		checkUpdate:   make(chan struct{}, 1),
 		applyUpdate:   make(chan struct{}, 1),
 		dismissUpdate: make(chan struct{}, 1),
+		deployment:    make(chan deploymentSelection, 1),
 	}
 }
 
@@ -62,6 +73,7 @@ type startupTracker struct {
 	mu       sync.RWMutex
 	home     string
 	snapshot startupSnapshot
+	listener func(startupSnapshot)
 }
 
 func newStartupTracker(home string) *startupTracker {
@@ -72,12 +84,14 @@ func newStartupTracker(home string) *startupTracker {
 
 func (t *startupTracker) reset() {
 	t.mu.Lock()
+	deployment := t.snapshot.Deployment
 	t.snapshot = startupSnapshot{
-		State:   "starting",
-		Message: "Preparing Athena",
-		Version: launcherVersion,
-		LogPath: filepath.Join(t.home, "logs", "launcher.log"),
-		Update:  startupUpdate{State: "idle"},
+		State:      "starting",
+		Message:    "Preparing Athena",
+		Version:    launcherVersion,
+		LogPath:    filepath.Join(t.home, "logs", "launcher.log"),
+		Update:     startupUpdate{State: "idle"},
+		Deployment: deployment,
 		Steps: []startupStep{
 			{ID: "manifest", Label: "Release manifest", Status: "pending"},
 			{ID: "database-package", Label: "PostgreSQL package", Status: "pending"},
@@ -91,6 +105,36 @@ func (t *startupTracker) reset() {
 			{ID: "frontend", Label: "Athena UI", Status: "pending"},
 		},
 	}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) awaitDeployment(selection deploymentSelection) {
+	t.mu.Lock()
+	t.snapshot.State = "configuration"
+	t.snapshot.Message = "Choose where Athena should connect"
+	t.snapshot.Deployment = startupDeployment{Required: true, Mode: selection.Mode, RemoteURL: selection.RemoteURL, DeviceToken: selection.Token}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) deploymentError(err error) {
+	t.mu.Lock()
+	if err != nil {
+		t.snapshot.Deployment.Error = err.Error()
+	}
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) deploymentConfigured(selection deploymentSelection) {
+	t.mu.Lock()
+	t.snapshot.State = "starting"
+	t.snapshot.Message = "Preparing Athena"
+	t.snapshot.Deployment = startupDeployment{Mode: selection.Mode, RemoteURL: selection.RemoteURL, DeviceToken: selection.Token}
 	t.touchLocked()
 	t.mu.Unlock()
 	t.persist()
@@ -256,6 +300,18 @@ func (t *startupTracker) persist() {
 	if err := os.WriteFile(temporary, data, 0o600); err == nil {
 		_ = os.Rename(temporary, path)
 	}
+	t.mu.RLock()
+	listener := t.listener
+	t.mu.RUnlock()
+	if listener != nil {
+		listener(snapshot)
+	}
+}
+
+func (t *startupTracker) listen(listener func(startupSnapshot)) {
+	t.mu.Lock()
+	t.listener = listener
+	t.mu.Unlock()
 }
 
 type startupServer struct {
@@ -320,6 +376,83 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *sta
 		default:
 		}
 		response.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("/api/deployment", func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			response.Header().Set("Allow", http.MethodPost)
+			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if control == nil || !tracker.current().Deployment.Required {
+			http.Error(response, "deployment selection is not currently available", http.StatusConflict)
+			return
+		}
+		var requested deploymentSelection
+		decoder := json.NewDecoder(io.LimitReader(request.Body, 16<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&requested); err != nil {
+			http.Error(response, "invalid deployment selection: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		selection, err := normalizeDeployment(requested)
+		if err != nil {
+			tracker.deploymentError(err)
+			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		state, err := loadState(tracker.home)
+		if err != nil {
+			tracker.deploymentError(err)
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		state.ConnectionMode = selection.Mode
+		state.RemoteClientURL = selection.RemoteURL
+		state.RemoteDeviceToken = selection.Token
+		if err := saveState(tracker.home, state); err != nil {
+			tracker.deploymentError(err)
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tracker.deploymentConfigured(selection)
+		select {
+		case control.deployment <- selection:
+		default:
+		}
+		writeStartupJSON(response, selection)
+	})
+	mux.HandleFunc("/api/browser-settings", func(response http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodGet:
+			state, err := loadState(tracker.home)
+			if err != nil {
+				http.Error(response, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeStartupJSON(response, browserSettingsFromState(tracker.home, state))
+		case http.MethodPost:
+			var requested browserSettingsRequest
+			decoder := json.NewDecoder(io.LimitReader(request.Body, 16<<10))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&requested); err != nil {
+				http.Error(response, "invalid browser settings: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			state, err := loadState(tracker.home)
+			if err != nil {
+				http.Error(response, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			applyBrowserSettings(state, requested)
+			if err := saveState(tracker.home, state); err != nil {
+				http.Error(response, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeStartupJSON(response, browserSettingsFromState(tracker.home, state))
+		default:
+			response.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodPost}, ", "))
+			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 	mux.HandleFunc("/api/update/check", func(response http.ResponseWriter, request *http.Request) {
 		if !acceptStartupAction(response, request, control != nil) {

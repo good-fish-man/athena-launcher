@@ -43,6 +43,27 @@ func checkPackageUpdates(home string, manifest *Manifest) []packageUpdate {
 	return updates
 }
 
+func checkFrontendUpdates(home string, manifest *Manifest) []packageUpdate {
+	if manifest == nil || manifest.Frontend == nil {
+		return nil
+	}
+	artifact := manifest.Frontend.Artifacts[platformKey()]
+	return appendPackageUpdate(nil, "frontend", "Athena UI", filepath.Join(home, "frontend"), artifact.SHA256)
+}
+
+func installedFrontendUsable(home string, manifest *Manifest) bool {
+	if manifest == nil || manifest.Frontend == nil {
+		return false
+	}
+	artifact := manifest.Frontend.Artifacts[platformKey()]
+	root := findArtifactRootByMarker(filepath.Join(home, "frontend"), artifact.SHA256)
+	if root == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(frontendRoot(root, manifest.Frontend.Root), "index.html"))
+	return err == nil
+}
+
 func appendPackageUpdate(updates []packageUpdate, component, displayName, root, remoteHash string) []packageUpdate {
 	remoteHash = strings.ToLower(strings.TrimSpace(remoteHash))
 	markers, _ := filepath.Glob(filepath.Join(root, "*", ".artifact-sha256"))

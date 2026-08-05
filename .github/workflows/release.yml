@@ -83,13 +83,13 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           mkdir -p dist/bin
-          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
+          go build -trimpath -tags "desktop,production" -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
           BINARY="dist/bin/athena-launcher-${GOARCH}" VERSION="$version" ARCH="$GOARCH" ./packaging/macos/package-dmg.sh
       - uses: actions/upload-artifact@v7
         with:
@@ -115,7 +115,7 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CGO_ENABLED = "0"
-          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifestUrl" -o dist/bin/athena-launcher.exe .
+          go build -trimpath -tags "desktop,production" -ldflags "-s -w -H windowsgui -X main.launcherVersion=$version -X main.defaultManifestURL=$manifestUrl" -o dist/bin/athena-launcher.exe .
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -150,17 +150,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install Wails Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
       - name: Build Linux launcher
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           mkdir -p dist/bin
-          go build -trimpath -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
+          go build -trimpath -tags "desktop,production,webkit2_41" -ldflags "-s -w -X main.launcherVersion=$version -X main.defaultManifestURL=$manifest_url" -o "dist/bin/athena-launcher-${GOARCH}" .
       - name: Build AppImage
         env:
           APPIMAGE_ARCH: ${{ matrix.appimage_arch }}

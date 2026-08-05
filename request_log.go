@@ -2,10 +2,11 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	log "github.com/good-fish-man/logx"
 )
 
 type launcherResponseWriter struct {
@@ -43,13 +44,20 @@ func requestErrorLogger(component string, next http.Handler) http.Handler {
 		writer := &launcherResponseWriter{ResponseWriter: response, status: http.StatusOK}
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				fmt.Printf("[%s] ERROR method=%s path=%s panic=%v\n%s", component, request.Method, request.URL.RequestURI(), recovered, debug.Stack())
+				log.ErrorfCtx(request.Context(), "[%s] panic recovered method=%s path=%s err=%v\n%s", component, request.Method, request.URL.RequestURI(), recovered, debug.Stack())
 				if !writer.wroteHeader {
 					http.Error(writer, "internal server error", http.StatusInternalServerError)
 				}
 			}
 			if writer.status >= http.StatusBadRequest {
-				fmt.Printf("[%s] request failed method=%s path=%s status=%d cost=%s response=%q\n", component, request.Method, request.URL.RequestURI(), writer.status, time.Since(started), bytes.TrimSpace(writer.body.Bytes()))
+				log.ErrorwCtx(request.Context(), "launcher request failed",
+					"component", component,
+					"method", request.Method,
+					"path", request.URL.RequestURI(),
+					"status", writer.status,
+					"cost", time.Since(started),
+					"response", string(bytes.TrimSpace(writer.body.Bytes())),
+				)
 			}
 		}()
 		next.ServeHTTP(writer, request)

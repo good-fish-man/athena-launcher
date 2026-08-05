@@ -142,7 +142,7 @@ func (d *managedDatabase) binary(name string) string {
 }
 
 func portAvailable(port uint32) bool {
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return false
 	}

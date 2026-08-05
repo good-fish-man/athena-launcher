@@ -3,15 +3,13 @@ set -euo pipefail
 
 BINARY=${BINARY:?BINARY is required}
 VERSION=${VERSION:?VERSION is required}
-ARCH=${ARCH:?ARCH is required}
-OUTPUT_DIR=${OUTPUT_DIR:-dist/installers}
-HDIUTIL=${HDIUTIL:-hdiutil}
+APP_DIR=${APP_DIR:?APP_DIR is required}
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 app="$work/Athena.app"
 contents="$app/Contents"
-mkdir -p "$contents/MacOS" "$contents/Resources/licenses" "$OUTPUT_DIR"
+mkdir -p "$contents/MacOS" "$contents/Resources/licenses"
 cp "$BINARY" "$contents/MacOS/athena-launcher"
 cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$contents/Resources/licenses/"
 chmod 755 "$contents/MacOS/athena-launcher"
@@ -23,7 +21,6 @@ cat > "$contents/Info.plist" <<EOF
 <dict>
   <key>CFBundleDisplayName</key><string>Athena</string>
   <key>CFBundleExecutable</key><string>athena-launcher</string>
-  <key>CFBundleIconFile</key><string>athena</string>
   <key>CFBundleIdentifier</key><string>ai.athena.launcher</string>
   <key>CFBundleName</key><string>Athena</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -31,30 +28,15 @@ cat > "$contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSLocationWhenInUseUsageDescription</key><string>Athena uses your location only when you ask location-dependent questions such as local weather.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Athena controls an application only after you ask the Agent to do so and approve the requested desktop action.</string>
   <key>NSMicrophoneUsageDescription</key><string>Athena uses the microphone only when you start voice input or a voice conversation.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Athena converts your speech to text only when you start voice input or a voice conversation.</string>
 </dict>
 </plist>
 EOF
 
-icon_png="$work/athena.svg.png"
-if qlmanage -t -s 1024 -o "$work" packaging/athena.svg >/dev/null 2>&1 && [ -f "$icon_png" ]; then
-  iconset="$work/athena.iconset"
-  mkdir -p "$iconset"
-  for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" "$icon_png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
-    retina=$((size * 2))
-    sips -z "$retina" "$retina" "$icon_png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
-  done
-  iconutil -c icns "$iconset" -o "$contents/Resources/athena.icns"
-fi
-
 codesign --force --deep --sign - --entitlements packaging/macos/entitlements.plist "$app"
-dmg_root="$work/dmg"
-mkdir -p "$dmg_root"
-cp -R "$app" "$dmg_root/Athena.app"
-ln -s /Applications "$dmg_root/Applications"
-output="$OUTPUT_DIR/Athena_${VERSION}_macOS_${ARCH}.dmg"
-"$HDIUTIL" create -volname "Athena" -srcfolder "$dmg_root" -ov -format UDZO "$output" >/dev/null
-[ -s "$output" ] || { echo "DMG was not created: $output" >&2; exit 1; }
-echo "created $output"
+mkdir -p "$(dirname "$APP_DIR")"
+rm -rf "$APP_DIR"
+mv "$app" "$APP_DIR"
+echo "created $APP_DIR"

@@ -2,9 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Athena Launcher 是 Athena Agent 平台的桌面安装器和本地服务管理器。用户只需下载与操作系统匹配的一个安装包；Launcher 会安装独立 PostgreSQL，下载并校验 Runtime、Client、UI，生成相互兼容的配置，按顺序启动服务，并打开可视化启动中心。
+设备运行时设计：[Agent Desktop Runtime](docs/agent-desktop-runtime.md)
 
-Launcher 本身只使用 Go 标准库，可以编译为单个可执行文件。
+Athena Launcher 是基于 Wails 的 Athena 桌面应用和本地服务管理器。用户只需下载与操作系统匹配的一个安装包；Launcher 会安装独立 PostgreSQL，下载并校验 Runtime、Client、UI，生成相互兼容的配置，按顺序启动服务，并在原生桌面窗口中展示启动中心和 Athena UI。
+
+桌面外壳使用 Wails v2 和系统 WebView；React UI 仍可作为独立版本化产物更新，但由 Wails 窗口直接加载，不再启动单独的前端 HTTP 服务。
 
 ## 管理的内容
 
@@ -14,11 +16,20 @@ Launcher 本身只使用 Go 标准库，可以编译为单个可执行文件。
 - 在 `~/.athena` 初始化 PostgreSQL，随机生成密码并创建 `agent_runtime` 数据库。
 - 自动生成匹配的 Runtime、Client 和 Skills 配置。
 - 按 PostgreSQL、Runtime、Client、UI 的依赖顺序启动并执行健康检查。
-- 在 `http://127.0.0.1:17890` 展示安装、启动、更新和实时日志。
-- 在 `http://127.0.0.1:3000` 提供 Athena UI。
+- 在 Wails 原生窗口中展示安装、启动、更新、实时日志和 Athena UI。
+- 桌面模式不监听 `17890` 或 `3000`；显式使用 `start`/`run` 的无界面兼容模式仍提供浏览器页面。
 - 监控托管服务，并在异常退出后自动重启。
 - 每次启动比较本地与远程包 Hash，更新前由用户确认。
 - 复用已校验的安装包，并在服务更新时保留 PostgreSQL 和用户数据。
+
+## 本地或远程模式
+
+桌面应用每次启动时先显示连接方式：
+
+- **本地工作空间**：下载并管理 PostgreSQL、Agent Browser、Runtime、Runtime Client 和 UI。
+- **远程服务**：只下载或复用 Athena UI，检查远端 `agent-runtime-client` 的 `/healthz`，不下载、不启动本地数据库、Browser、Runtime 或 Client。
+
+远端地址会保存在 `~/.athena/state.json`。公网地址必须使用 HTTPS；只有 `localhost` 和其他回环地址可以使用 HTTP。可以填写服务根地址，也可以粘贴完整的 `/api/agent-runtime-client/v1` 地址，Launcher 会自动规范化。切换远端服务器时会清除旧服务器的登录 Token，用户需要在新服务器重新登录。远端服务必须允许 Athena 桌面来源进行 CORS 请求。
 
 ## 架构
 
@@ -27,11 +38,12 @@ flowchart TD
     Package["DMG、Windows 安装包、AppImage 或单文件"] --> Launcher["Athena Launcher"]
     Launcher --> Manifest["Release Manifest + SHA-256"]
     Manifest --> Packages["各平台产物"]
-    Launcher --> Startup["启动中心 :17890"]
+    Launcher --> Desktop["Wails 原生窗口"]
+    Desktop --> Startup["启动中心"]
+    Desktop --> UI["Athena React UI"]
     Launcher --> PG["托管 PostgreSQL :15432"]
     Launcher --> Runtime["Agent Runtime :18080/:18081"]
     Launcher --> Client["Runtime Client :8090"]
-    Launcher --> UI["Athena UI :3000"]
     PG --> Runtime
     PG --> Client
     Client --> Runtime
@@ -40,12 +52,11 @@ flowchart TD
 
 启动流程：
 
-1. 读取发布清单，并验证当前平台是否有可用产物。
-2. 下载缺失或变化的包并校验 SHA-256。
-3. 安装可选的原生 Agent Browser，并创建或复用本地 PostgreSQL 数据目录和凭据。
-4. 生成服务配置，不覆盖数据库数据目录。
-5. 依次启动 PostgreSQL、Runtime、Client 和 UI。
-6. 等待所有健康检查通过，然后进入 Athena。
+1. 用户选择本地工作空间或输入远端 Runtime Client 地址。
+2. 读取发布清单，并验证当前平台是否有可用产物。
+3. 本地模式下载全部缺失组件；远程模式只准备 UI。所有下载都校验 SHA-256。
+4. 本地模式生成配置并启动 PostgreSQL、Runtime 和 Client；远程模式验证远端 `/healthz`。
+5. 把已校验 UI 切换到 Wails 窗口并进入 Athena。
 
 ## 普通用户安装
 
@@ -76,7 +87,7 @@ chmod +x Athena_<version>_linux_x86_64.AppImage
 ./Athena_<version>_linux_x86_64.AppImage
 ```
 
-首次启动需要下载并初始化 PostgreSQL 与服务包，可能耗时几分钟。
+本地模式首次启动需要下载并初始化 PostgreSQL 与服务包，可能耗时几分钟；远程模式只准备 UI。
 
 ### 首次登录
 
@@ -91,7 +102,7 @@ Agent Runtime Client 只会在数据库中不存在 `athena` 账号时创建初�
 
 ## 启动中心与日志
 
-Launcher 会立即打开启动中心，展示 Manifest、安装包、配置、数据库、Runtime、Client 和 UI 步骤。失败时可切换日志来源、复制错误，处理原因后点击 **重试启动**。
+Wails 桌面窗口会立即展示启动中心，包括 Manifest、安装包、配置、数据库、Runtime、Client 和 UI 步骤。失败时可切换日志来源、复制错误，处理原因后点击 **重试启动**。
 
 默认目录：
 
@@ -127,7 +138,7 @@ athena-launcher update
 
 | 命令 | 用途 |
 | --- | --- |
-| `launch` | 按需启动并打开启动中心或 Athena |
+| `launch` | 安装包构建中打开 Wails 桌面窗口；CLI 构建中打开浏览器界面 |
 | `start` | 在后台启动托管 Launcher |
 | `run` | 前台运行，适合调试或系统服务管理器 |
 | `install` | 只下载和准备包/配置 |
@@ -159,14 +170,18 @@ export ATHENA_MANIFEST_URL="https://example.com/release-manifest.json"
 
 ## 从源码构建
 
-需要 Go 1.24 或更高版本。Launcher 没有第三方 Go Module 依赖。
+需要 Go 1.24 或更高版本。桌面构建使用 Wails v2；Linux 构建还需要 GTK3 和 WebKit2GTK 4.1 开发包。
 
 ```bash
 git clone https://github.com/good-fish-man/athena-launcher.git
 cd athena-launcher
 make test
 make build
+make desktop
+make desktop-run
 ```
+
+`make build` 生成保留浏览器界面的无界面/CLI 版本；`make desktop` 编译启用开发者工具的本地 Wails 桌面外壳。测试本地前端时使用 `make desktop-run`：它会先在相邻的 `frontend/agent-ui` 项目执行 `npm run build`，再让 Athena 直接加载该项目的 `dist`。按 `F12` 打开 WebView 检查器，Mac 紧凑键盘可能需要按 `Fn+F12`。macOS 上还会生成带麦克风、语音识别和定位权限声明的 `dist/Athena.app`，确保系统能够正常弹出授权。开发模式会跳过已下载前端包及前端更新提示，后端服务仍由 Manifest 管理；正式 Release 工作流不会包含 `devtools` 标签。如果仓库不是默认相邻目录结构，可传入 `FRONTEND_PROJECT=/path/to/agent-ui`，也可直接使用 `--frontend-dir /absolute/path/to/dist`。Linux 请先安装 `build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev`，并在发行构建中使用 `webkit2_41` 标签。
 
 构建全部平台单文件：
 
@@ -218,6 +233,8 @@ GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Releas
 
 - 托管 PostgreSQL 只监听 `127.0.0.1:15432`。
 - 随机数据库密码保存在权限为 `0600` 的配置/状态文件中。
+- agent-browser Vault 加密密钥只生成一次并保存在权限为 `0600` 的 Launcher 状态文件中，服务和安装包更新后继续复用。
+- 独立随机的内部服务令牌用于验证 Runtime 向 Client 创建定时任务的请求。
 - 所有下载产物都必须匹配 SHA-256。
 - 解压时拒绝绝对路径和 `..` 路径穿越。
 - 更新替换版本化安装目录，不删除 `~/.athena/data`。

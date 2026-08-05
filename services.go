@@ -25,21 +25,26 @@ type managedProcess struct {
 }
 
 type supervisor struct {
-	home        string
-	paths       *generatedPaths
-	manifest    *Manifest
-	executables map[string]string
-	processes   map[string]*managedProcess
-	exits       chan processExit
-	stopping    bool
-	tracker     *startupTracker
+	home                 string
+	paths                *generatedPaths
+	manifest             *Manifest
+	executables          map[string]string
+	processes            map[string]*managedProcess
+	exits                chan processExit
+	stopping             bool
+	tracker              *startupTracker
+	browserEncryptionKey string
+	internalServiceToken string
 }
 
-func newSupervisor(home string, paths *generatedPaths, manifest *Manifest, executables map[string]string, tracker *startupTracker) *supervisor {
-	return &supervisor{home: home, paths: paths, manifest: manifest, executables: executables, processes: make(map[string]*managedProcess), exits: make(chan processExit, len(manifest.Services)*2), tracker: tracker}
+func newSupervisor(home string, paths *generatedPaths, manifest *Manifest, executables map[string]string, tracker *startupTracker, browserEncryptionKey, internalServiceToken string) *supervisor {
+	return &supervisor{home: home, paths: paths, manifest: manifest, executables: executables, processes: make(map[string]*managedProcess), exits: make(chan processExit, len(manifest.Services)*2), tracker: tracker, browserEncryptionKey: browserEncryptionKey, internalServiceToken: internalServiceToken}
 }
 
 func (s *supervisor) StartAll(ctx context.Context) error {
+	if err := prepareManagedServicePorts(ctx, s.home, s.manifest); err != nil {
+		return err
+	}
 	for _, spec := range s.manifest.Services {
 		if err := s.start(ctx, spec); err != nil {
 			s.StopAll()
@@ -118,12 +123,18 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) (returnErr err
 	for key, value := range spec.Env {
 		env = setEnvironmentValue(env, key, expandValue(value, values))
 	}
+	if s.browserEncryptionKey != "" {
+		env = setEnvironmentValue(env, "AGENT_BROWSER_ENCRYPTION_KEY", s.browserEncryptionKey)
+	}
+	if s.internalServiceToken != "" {
+		env = setEnvironmentValue(env, "ATHENA_INTERNAL_SERVICE_TOKEN", s.internalServiceToken)
+	}
+	if browserExecutable := s.executables["agent-browser"]; browserExecutable != "" {
+		env = setEnvironmentValue(env, "ATHENA_AGENT_BROWSER_BIN", browserExecutable)
+	}
 	switch spec.Name {
 	case "agent-runtime":
 		env = append(env, "AGENT_RUNTIME_CONFIG="+s.paths.runtimeConfig)
-		if browserExecutable := s.executables["agent-browser"]; browserExecutable != "" {
-			env = append(env, "ATHENA_AGENT_BROWSER_BIN="+browserExecutable)
-		}
 	case "agent-runtime-client":
 		if len(args) == 0 {
 			args = []string{"--config", s.paths.clientConfig}

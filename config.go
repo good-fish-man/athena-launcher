@@ -73,18 +73,28 @@ type Artifact struct {
 }
 
 type launcherState struct {
-	LauncherPID    int               `json:"launcher_pid,omitempty"`
-	ManifestSource string            `json:"manifest_source,omitempty"`
-	Version        string            `json:"version,omitempty"`
-	DBPassword     string            `json:"db_password"`
-	Installed      map[string]string `json:"installed,omitempty"`
+	LauncherPID          int               `json:"launcher_pid,omitempty"`
+	ManifestSource       string            `json:"manifest_source,omitempty"`
+	Version              string            `json:"version,omitempty"`
+	ConnectionMode       string            `json:"connection_mode,omitempty"`
+	RemoteClientURL      string            `json:"remote_client_url,omitempty"`
+	RemoteDeviceToken    string            `json:"remote_device_token,omitempty"`
+	DBPassword           string            `json:"db_password"`
+	BrowserEncryptionKey string            `json:"browser_encryption_key"`
+	BrowserAuthMode      string            `json:"browser_auth_mode,omitempty"`
+	BrowserProfile       string            `json:"browser_profile,omitempty"`
+	InternalServiceToken string            `json:"internal_service_token"`
+	DeviceID             string            `json:"device_id"`
+	Installed            map[string]string `json:"installed,omitempty"`
 }
 
 type options struct {
 	command        string
 	home           string
 	manifestSource string
+	frontendDir    string
 	foreground     bool
+	desktop        *desktopAssetSwitch
 }
 
 func defaultHome() (string, error) {
@@ -265,6 +275,27 @@ func loadState(home string) (*launcherState, error) {
 			return nil, fmt.Errorf("generate database password: %w", err)
 		}
 		state.DBPassword = hex.EncodeToString(secret)
+	}
+	if state.BrowserEncryptionKey == "" {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, fmt.Errorf("generate browser vault encryption key: %w", err)
+		}
+		state.BrowserEncryptionKey = hex.EncodeToString(secret)
+	}
+	if state.InternalServiceToken == "" {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, fmt.Errorf("generate internal service token: %w", err)
+		}
+		state.InternalServiceToken = hex.EncodeToString(secret)
+	}
+	if state.DeviceID == "" {
+		secret := make([]byte, 16)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, fmt.Errorf("generate device id: %w", err)
+		}
+		state.DeviceID = "device-" + hex.EncodeToString(secret)
 	}
 	return state, nil
 }

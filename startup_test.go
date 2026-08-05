@@ -117,8 +117,44 @@ func TestStartupHandlerExposesStatusAndKnownLogs(t *testing.T) {
 	}
 }
 
+func TestStartupBrowserSettingsEndpointPersistsMode(t *testing.T) {
+	home := t.TempDir()
+	tracker := newStartupTracker(home)
+	handler := startupHandler(tracker, make(chan struct{}, 1), newStartupController())
+
+	post := httptest.NewRequest(http.MethodPost, "/api/browser-settings", strings.NewReader(`{"mode":"profile","profile":"Default"}`))
+	post.Header.Set("Content-Type", "application/json")
+	postResponse := httptest.NewRecorder()
+	handler.ServeHTTP(postResponse, post)
+	if postResponse.Code != http.StatusOK {
+		t.Fatalf("browser settings post response = %d %q", postResponse.Code, postResponse.Body.String())
+	}
+
+	state, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.BrowserAuthMode != browserAuthModeProfile || state.BrowserProfile != "Default" {
+		t.Fatalf("browser settings state = %q %q", state.BrowserAuthMode, state.BrowserProfile)
+	}
+
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "/api/browser-settings", nil))
+	if getResponse.Code != http.StatusOK || !strings.Contains(getResponse.Body.String(), `"mode":"profile"`) {
+		t.Fatalf("browser settings get response = %d %q", getResponse.Code, getResponse.Body.String())
+	}
+}
+
+func TestBrowserSettingsClearsProfileOutsideProfileMode(t *testing.T) {
+	state := &launcherState{BrowserAuthMode: browserAuthModeProfile, BrowserProfile: "Default"}
+	applyBrowserSettings(state, browserSettingsRequest{Mode: browserAuthModeIsolated, Profile: "Default"})
+	if state.BrowserAuthMode != browserAuthModeIsolated || state.BrowserProfile != "" {
+		t.Fatalf("browser settings = %q %q, want isolated with empty profile", state.BrowserAuthMode, state.BrowserProfile)
+	}
+}
+
 func TestStartupPageContainsLiveStatusUI(t *testing.T) {
-	for _, expected := range []string{"Startup Center", "/api/status", "/api/log?source=", "/api/update/apply", "Update and restart", "Open Athena"} {
+	for _, expected := range []string{"Startup Center", "/api/status", "/api/log?source=", "/api/update/apply", "/api/browser-settings", "Browser control mode", "Auto connect", "Update and restart", "Open Athena"} {
 		if !strings.Contains(startupPageHTML, expected) {
 			t.Fatalf("startup page is missing %q", expected)
 		}
