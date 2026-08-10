@@ -4,7 +4,7 @@
 
 - `internet.search` and `internet.fetch` handle normal public research.
 - Browser capabilities are reserved for login, JavaScript pages, forms, scrolling, downloads, CAPTCHA, and complex interaction.
-- Agent Runtime emits an `athena.agent.v2` Action; it never starts Chromium or reads a browser profile.
+- Agent Runtime emits an `athena.agent.v3` Action; it never starts Chromium or reads a browser profile.
 - Runtime Client routes Actions, waits for Observations, and resumes Agent Core.
 - Athena Launcher owns the browser process, local execution, and Perception Layer.
 - Browser Runtime executes browser Actions only; the Browser Observation Engine produces browser Observations.
@@ -26,13 +26,18 @@ Runtime Client
 
 ## Browser capabilities
 
+- `browser.task`: executes a reversible browser task intent through the local Browser System, reusing the active browser session, managing tabs/refs/retries internally, and returning a structured Observation.
 - `browser.open`: opens a URL or search-result page and creates a persistent browser session.
 - `browser.navigate`: navigates an existing or new session to an exact HTTP(S) URL.
 - `browser.observe`: returns the current URL, title, visible body text, accessibility snapshot, and normalized `key_elements`.
 - `browser.click`: clicks a semantic ref such as `@e12` from the latest observation.
 - `browser.type`: fills a semantic input ref with text.
+- `browser.hover`: hovers an observed semantic ref without using coordinates.
+- `browser.select`: selects a value in an observed combobox ref.
+- `browser.drag`: drags one observed semantic ref to another after approval.
 - `browser.press`: sends a bounded navigation key such as `Enter`, `Escape`, or `Tab`.
-- `browser.scroll`: scrolls up or down.
+- `browser.scroll`: scrolls up, down, left, or right.
+- `browser.back`, `browser.forward`, and `browser.refresh`: perform verified history or reload navigation.
 - `browser.wait`: waits a bounded number of milliseconds, then observes the page again.
 - `browser.download`: downloads a user-requested file by clicking a semantic ref and stores it in Athena's download directory.
 - `browser.screenshot`: captures a page screenshot and returns the local image path.
@@ -60,7 +65,7 @@ Athena uses three distinct layers:
 
 Browser Runtime belongs to the Action Layer. It should open, navigate, click, type, press, scroll, wait, download, screenshot, and close. It must not decide that a task succeeded.
 
-Browser Observation Engine belongs to the Perception Layer. It reads browser state after execution and emits URL, title, page snapshot, key elements, screenshot metadata, download state, cookie summary, tab state, and takeover hints.
+Browser Observation Engine belongs to the Perception Layer. It reads browser state after execution and emits a bounded semantic view, adaptive visual/spatial evidence, Session deltas, action verification, download state, cookie summary, tab state, and takeover hints.
 
 ```text
 Perception Layer
@@ -109,8 +114,20 @@ Every browser Observation now includes:
   },
   "tabs": {"available": true, "active_tab_id": "t1", "count": 1},
   "cookie_status": {"available": true, "raw_cookies_exposed": false, "count": 4},
-  "screenshot": {"available": true, "path": "/Users/me/.athena/browser/screenshots/athena-...png"},
-  "session_diagnostics": {"available": true}
+  "screenshot": {"available": true, "scope": "viewport", "path": "/Users/me/.athena/browser/screenshots/athena-...png"},
+  "session_diagnostics": {"available": true},
+  "verification": {
+    "action": "navigate",
+    "status": "verified",
+    "reason": "navigation_target_observed"
+  },
+  "perception": {
+    "schema": "athena.perception.v6",
+    "incremental": {"sequence": 3, "has_previous": true, "changed": true},
+    "semantic": {},
+    "visual": {},
+    "spatial": {}
+  }
 }
 ```
 

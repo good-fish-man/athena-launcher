@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${VERSION:-0.1.3}
+VERSION=${VERSION:-0.1.4}
 DIST=${DIST:-dist}
 MANIFEST_URL=${MANIFEST_URL:-https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json}
 OUTPUT="$ROOT/$DIST/launchers"
@@ -19,8 +19,8 @@ build() {
     cd "$ROOT"
     GOTOOLCHAIN=local CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
       -trimpath \
-      -ldflags "-s -w -X main.launcherVersion=$VERSION -X main.defaultManifestURL=$MANIFEST_URL" \
-      -o "$output" .
+      -ldflags "-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$VERSION -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$MANIFEST_URL" \
+      -o "$output" ./cmd/athena-launcher
   )
 }
 

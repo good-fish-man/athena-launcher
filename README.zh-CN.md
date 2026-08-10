@@ -4,9 +4,18 @@
 
 设备运行时设计：[Agent Desktop Runtime](docs/agent-desktop-runtime.md)
 
+浏览器：[常见命令手册](docs/browser-command-guide.md#简体中文) | [Athena Browser System v3](docs/browser-system-v3.md#简体中文)
+
+源码导航：[项目结构](docs/project-structure.md#简体中文)
+
 Athena Launcher 是基于 Wails 的 Athena 桌面应用和本地服务管理器。用户只需下载与操作系统匹配的一个安装包；Launcher 会安装独立 PostgreSQL，下载并校验 Runtime、Client、UI，生成相互兼容的配置，按顺序启动服务，并在原生桌面窗口中展示启动中心和 Athena UI。
 
 桌面外壳使用 Wails v2 和系统 WebView；React UI 仍可作为独立版本化产物更新，但由 Wails 窗口直接加载，不再启动单独的前端 HTTP 服务。
+
+<p align="center">
+  <img src="docs/images/startup-center-overview.jpg" alt="展示服务健康状态和浏览器控制模式的 Athena 启动中心">
+</p>
+<p align="center"><sub>真实启动中心：已完成 Manifest 校验、服务健康检查和浏览器模式识别。</sub></p>
 
 ## 管理的内容
 

@@ -4,9 +4,18 @@
 
 Device runtime design: [Agent Desktop Runtime](docs/agent-desktop-runtime.md)
 
+Browser: [Command Guide](docs/browser-command-guide.md) | [Athena Browser System v3](docs/browser-system-v3.md)
+
+Source code navigation: [Project Structure](docs/project-structure.md)
+
 Athena Launcher is the Wails desktop application and local service manager for the Athena agent platform. A user downloads one package for their operating system; the launcher installs a private PostgreSQL instance, downloads verified Runtime/Client/UI artifacts, generates compatible configuration, starts every service in order, and presents the startup center and Athena UI in a native desktop window.
 
 The desktop shell uses Wails v2 and the operating system WebView. The React UI remains independently versioned and updateable, but is loaded directly by the Wails window instead of a separate frontend HTTP server.
+
+<p align="center">
+  <img src="docs/images/startup-center-overview.jpg" alt="Athena Startup Center showing healthy services and browser control modes">
+</p>
+<p align="center"><sub>The real Startup Center after manifest verification, service health checks, and browser-mode discovery.</sub></p>
 
 ## What It Manages
 

@@ -15,7 +15,7 @@ Execution rules:
 
 ## Connection lifecycle
 
-- Launcher initiates the outbound `athena.agent.v2` WebSocket and advertises its platform and capabilities in `HELLO`.
+- Launcher initiates the outbound `athena.agent.v3` WebSocket and advertises its platform and capabilities in `HELLO`.
 - It sends a heartbeat every 15 seconds. Runtime Client treats a connection without traffic for 45 seconds as offline.
 - Disconnects use exponential backoff up to 30 seconds; a stable connection resets the delay for fast recovery.
 - The device is bound to the first authenticated Athena user who explicitly binds or routes an action to it. Runtime Client rejects cross-user routing.
