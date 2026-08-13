@@ -3,7 +3,7 @@ module athena-launcher
 go 1.25.0
 
 require (
-	github.com/good-fish-man/logx v0.1.0
+	github.com/good-fish-man/logx v0.1.5
 	github.com/wailsapp/wails/v2 v2.10.1
 	golang.org/x/net v0.54.0
 )
