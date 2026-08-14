@@ -226,6 +226,21 @@ func TestNewDeviceRuntimeRepairsRecoveredObservationDeviceID(t *testing.T) {
 	}
 }
 
+func TestDeviceRuntimeRejectsStaleFencingToken(t *testing.T) {
+	runtime := &deviceRuntime{}
+	runtime.setLease("control-current", 9, time.Now().Add(time.Minute))
+	if runtime.acceptsLease(deviceAction{LeaseOwner: "control-old", FencingToken: 8}) {
+		t.Fatal("stale control-plane lease was accepted")
+	}
+	if !runtime.acceptsLease(deviceAction{LeaseOwner: "control-current", FencingToken: 9}) {
+		t.Fatal("current control-plane lease was rejected")
+	}
+	runtime.setLease("control-current", 9, time.Now().Add(-time.Second))
+	if runtime.acceptsLease(deviceAction{LeaseOwner: "control-current", FencingToken: 9}) {
+		t.Fatal("expired control-plane lease was accepted")
+	}
+}
+
 func TestBrowserChallengeObservationRequiresUser(t *testing.T) {
 	state := map[string]any{
 		"challenge_detected": true,

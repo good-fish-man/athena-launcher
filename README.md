@@ -219,6 +219,7 @@ Build desktop formats with the scripts in `packaging/macos`, `packaging/windows`
 - Platform key such as `darwin-arm64` or `windows-amd64`.
 - HTTPS URL.
 - 64-character SHA-256.
+- Exact compressed `size_bytes`.
 - Archive format and executable path.
 - Service order and health URL where applicable.
 
@@ -259,11 +260,12 @@ Repository-scoped GitHub tokens cannot create releases in the other repositories
   key is placed in the Runtime trust store.
 - Provider packages are immutable and Runtime receives only Registry-approved
   permission/resource subsets.
-- Artifact hashes are mandatory.
+- Artifact hashes, exact byte sizes, signatures, and allowlisted platform-signing evidence are mandatory.
 - Archive extraction rejects absolute paths and `..` traversal.
+- Download and extraction enforce redirect, entry-count, per-file, and total-size budgets.
 - Updates replace versioned installation directories, not `~/.athena/data`.
 - Remote manifests require HTTPS.
-- Protect release-manifest write access and configure platform code signing for public distribution.
+- Production publication fails closed unless every platform has valid code-signing evidence; no unsigned override is accepted.
 
 ## Related Projects
 

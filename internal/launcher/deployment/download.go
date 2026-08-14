@@ -23,9 +23,18 @@ import (
 	ga "github.com/good-fish-man/athena-protocol/protocol/ga/v1"
 )
 
-var downloadClient = &http.Client{Timeout: 30 * time.Minute}
+var downloadClient = &http.Client{
+	Timeout:       30 * time.Minute,
+	CheckRedirect: validateDownloadRedirect,
+}
 
-const databaseArtifactMarkerVersion = "2"
+const (
+	databaseArtifactMarkerVersion = "2"
+	maxArtifactDownloadBytes      = int64(64 << 30)
+	maxArchiveEntries             = 100_000
+	maxArchiveFileBytes           = int64(16 << 30)
+	maxArchiveExpandedBytes       = int64(128 << 30)
+)
 
 func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 	data, err := readSource(ctx, source, 4<<20)
@@ -172,12 +181,41 @@ func readSource(ctx context.Context, source string, limit int64) ([]byte, error)
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 		}
-		return io.ReadAll(io.LimitReader(resp.Body, limit))
+		if resp.ContentLength > limit {
+			return nil, fmt.Errorf("download content length %d exceeds limit %d", resp.ContentLength, limit)
+		}
+		return readLimited(resp.Body, limit)
 	}
 	if parsed != nil && parsed.Scheme == "file" {
 		source = parsed.Path
 	}
-	return os.ReadFile(source)
+	file, err := os.Open(source)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	if info, statErr := file.Stat(); statErr != nil {
+		return nil, statErr
+	} else if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("source must be a regular file: %s", source)
+	} else if info.Size() > limit {
+		return nil, fmt.Errorf("source size %d exceeds limit %d", info.Size(), limit)
+	}
+	return readLimited(file, limit)
+}
+
+func readLimited(reader io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("read limit must be greater than zero")
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("content exceeds limit %d", limit)
+	}
+	return data, nil
 }
 
 func installServices(ctx context.Context, home string, manifest *Manifest, state *launcherState) (map[string]string, error) {
@@ -398,26 +436,30 @@ func installArtifact(ctx context.Context, home, target string, artifact Artifact
 	temporaryPath := temporary.Name()
 	_ = temporary.Close()
 	defer os.Remove(temporaryPath)
-	if err := downloadFile(ctx, artifact.URL, temporaryPath); err != nil {
+	if err := downloadFile(ctx, artifact.URL, temporaryPath, artifact.SizeBytes); err != nil {
 		return err
 	}
 	if err := verifySHA256(temporaryPath, artifact.SHA256); err != nil {
 		return err
 	}
-	staging := target + ".staging"
-	_ = os.RemoveAll(staging)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
+	staging, err := os.MkdirTemp(filepath.Dir(target), "."+filepath.Base(target)+".staging-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
 	if err := extractArtifact(temporaryPath, staging, artifact.Format, artifact.Executable); err != nil {
-		_ = os.RemoveAll(staging)
 		return err
 	}
-	_ = os.RemoveAll(target)
-	return os.Rename(staging, target)
+	return replaceArtifactDirectory(staging, target)
 }
 
-func downloadFile(ctx context.Context, source, target string) error {
+func downloadFile(ctx context.Context, source, target string, expectedSize int64) error {
+	if expectedSize <= 0 || expectedSize > maxArtifactDownloadBytes {
+		return fmt.Errorf("artifact size %d is outside the supported range", expectedSize)
+	}
 	parsed, err := url.Parse(source)
 	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 		if err := validateDownloadURL(parsed); err != nil {
@@ -435,11 +477,14 @@ func downloadFile(ctx context.Context, source, target string) error {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 		}
-		file, err := os.OpenFile(target, os.O_WRONLY|os.O_TRUNC, 0o600)
+		if resp.ContentLength >= 0 && resp.ContentLength != expectedSize {
+			return fmt.Errorf("download size mismatch: expected %d bytes, server declared %d", expectedSize, resp.ContentLength)
+		}
+		file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			return err
 		}
-		_, copyErr := io.Copy(file, resp.Body)
+		copyErr := copyExact(file, resp.Body, expectedSize)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return copyErr
@@ -454,11 +499,21 @@ func downloadFile(ctx context.Context, source, target string) error {
 		return err
 	}
 	defer input.Close()
-	output, err := os.OpenFile(target, os.O_WRONLY|os.O_TRUNC, 0o600)
+	info, err := input.Stat()
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(output, input)
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("artifact source must be a regular file: %s", source)
+	}
+	if info.Size() != expectedSize {
+		return fmt.Errorf("artifact size mismatch: expected %d bytes, got %d", expectedSize, info.Size())
+	}
+	output, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	copyErr := copyExact(output, input, expectedSize)
 	closeErr := output.Close()
 	if copyErr != nil {
 		return copyErr
@@ -466,8 +521,28 @@ func downloadFile(ctx context.Context, source, target string) error {
 	return closeErr
 }
 
+func copyExact(output io.Writer, input io.Reader, expected int64) error {
+	written, err := io.Copy(output, io.LimitReader(input, expected+1))
+	if err != nil {
+		return err
+	}
+	if written != expected {
+		return fmt.Errorf("artifact size mismatch: expected %d bytes, got %d", expected, written)
+	}
+	return nil
+}
+
 func validateDownloadURL(parsed *url.URL) error {
+	if parsed == nil || parsed.Host == "" {
+		return fmt.Errorf("download URL must be absolute")
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("download URL cannot contain credentials: %s", parsed.Redacted())
+	}
 	if parsed.Scheme == "https" {
+		if ip := net.ParseIP(parsed.Hostname()); ip != nil && (ip.IsUnspecified() || ip.IsMulticast() || ip.IsPrivate()) {
+			return fmt.Errorf("HTTPS download URL cannot target a non-public IP: %s", parsed.Redacted())
+		}
 		return nil
 	}
 	host := parsed.Hostname()
@@ -475,6 +550,47 @@ func validateDownloadURL(parsed *url.URL) error {
 		return nil
 	}
 	return fmt.Errorf("remote downloads require HTTPS: %s", parsed.Redacted())
+}
+
+func validateDownloadRedirect(request *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("download stopped after too many redirects")
+	}
+	if err := validateDownloadURL(request.URL); err != nil {
+		return err
+	}
+	if len(via) > 0 && strings.EqualFold(via[len(via)-1].URL.Scheme, "https") && !strings.EqualFold(request.URL.Scheme, "https") {
+		return fmt.Errorf("download redirect cannot downgrade HTTPS to %s", request.URL.Scheme)
+	}
+	return nil
+}
+
+func replaceArtifactDirectory(staging, target string) error {
+	rollback := target + ".rollback"
+	if err := os.RemoveAll(rollback); err != nil {
+		return fmt.Errorf("remove stale artifact rollback: %w", err)
+	}
+	hadTarget := false
+	if _, err := os.Stat(target); err == nil {
+		if err := os.Rename(target, rollback); err != nil {
+			return fmt.Errorf("preserve current artifact: %w", err)
+		}
+		hadTarget = true
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(staging, target); err != nil {
+		if hadTarget {
+			_ = os.Rename(rollback, target)
+		}
+		return fmt.Errorf("activate staged artifact: %w", err)
+	}
+	if hadTarget {
+		if err := os.RemoveAll(rollback); err != nil {
+			return fmt.Errorf("remove previous artifact after activation: %w", err)
+		}
+	}
+	return nil
 }
 
 func verifySHA256(path, expected string) error {
@@ -521,6 +637,19 @@ func extractZIP(path, target string) error {
 		return err
 	}
 	defer reader.Close()
+	budget := archiveBudget{}
+	for _, item := range reader.File {
+		if item.UncompressedSize64 > uint64(maxArchiveFileBytes) {
+			return fmt.Errorf("archive entry %q exceeds the per-file limit", item.Name)
+		}
+		size := int64(item.UncompressedSize64)
+		if item.FileInfo().IsDir() {
+			size = 0
+		}
+		if err := budget.reserve(size); err != nil {
+			return fmt.Errorf("archive entry %q: %w", item.Name, err)
+		}
+	}
 	for _, item := range reader.File {
 		destination, err := safeArchivePath(target, item.Name)
 		if err != nil {
@@ -532,11 +661,14 @@ func extractZIP(path, target string) error {
 			}
 			continue
 		}
+		if !item.Mode().IsRegular() {
+			return fmt.Errorf("unsupported ZIP entry type for %q", item.Name)
+		}
 		input, err := item.Open()
 		if err != nil {
 			return err
 		}
-		if err := writeArchiveFile(destination, input, item.Mode()); err != nil {
+		if err := writeArchiveFileExact(destination, input, item.Mode(), int64(item.UncompressedSize64)); err != nil {
 			_ = input.Close()
 			return err
 		}
@@ -557,6 +689,7 @@ func extractTarGZ(path, target string) error {
 	}
 	defer gzipReader.Close()
 	reader := tar.NewReader(gzipReader)
+	budget := archiveBudget{}
 	type archiveSymlink struct {
 		path   string
 		target string
@@ -570,6 +703,13 @@ func extractTarGZ(path, target string) error {
 		if err != nil {
 			return err
 		}
+		entrySize := int64(0)
+		if header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA {
+			entrySize = header.Size
+		}
+		if err := budget.reserve(entrySize); err != nil {
+			return fmt.Errorf("archive entry %q: %w", header.Name, err)
+		}
 		destination, err := safeArchivePath(target, header.Name)
 		if err != nil {
 			return err
@@ -580,7 +720,7 @@ func extractTarGZ(path, target string) error {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if err := writeArchiveFile(destination, reader, os.FileMode(header.Mode)); err != nil {
+			if err := writeArchiveFileExact(destination, reader, os.FileMode(header.Mode), header.Size); err != nil {
 				return err
 			}
 		case tar.TypeSymlink:
@@ -588,6 +728,8 @@ func extractTarGZ(path, target string) error {
 				return err
 			}
 			symlinks = append(symlinks, archiveSymlink{path: destination, target: filepath.FromSlash(header.Linkname)})
+		default:
+			return fmt.Errorf("unsupported tar entry type %d for %q", header.Typeflag, header.Name)
 		}
 	}
 	// Create links only after regular files are written so later entries cannot
@@ -631,7 +773,30 @@ func safeArchivePath(root, name string) (string, error) {
 	return destination, nil
 }
 
-func writeArchiveFile(path string, input io.Reader, mode os.FileMode) error {
+type archiveBudget struct {
+	entries int
+	bytes   int64
+}
+
+func (b *archiveBudget) reserve(size int64) error {
+	if size < 0 || size > maxArchiveFileBytes {
+		return fmt.Errorf("entry size %d is outside the supported range", size)
+	}
+	b.entries++
+	if b.entries > maxArchiveEntries {
+		return fmt.Errorf("archive contains more than %d entries", maxArchiveEntries)
+	}
+	if size > maxArchiveExpandedBytes-b.bytes {
+		return fmt.Errorf("archive expands beyond %d bytes", maxArchiveExpandedBytes)
+	}
+	b.bytes += size
+	return nil
+}
+
+func writeArchiveFileExact(path string, input io.Reader, mode os.FileMode, expected int64) error {
+	if expected < 0 || expected > maxArchiveFileBytes {
+		return fmt.Errorf("archive file size %d is outside the supported range", expected)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -642,7 +807,7 @@ func writeArchiveFile(path string, input io.Reader, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(output, input)
+	copyErr := copyExact(output, input, expected)
 	closeErr := output.Close()
 	if copyErr != nil {
 		return copyErr
@@ -656,5 +821,9 @@ func copyPath(source, target string, mode os.FileMode) error {
 		return err
 	}
 	defer input.Close()
-	return writeArchiveFile(target, input, mode)
+	info, err := input.Stat()
+	if err != nil {
+		return err
+	}
+	return writeArchiveFileExact(target, input, mode, info.Size())
 }

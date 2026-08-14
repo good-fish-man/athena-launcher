@@ -9,10 +9,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
-const maxSecretFileSize = 4096
+const (
+	maxSecretFileSize = 4096
+	maxStateFileSize  = 1 << 20
+)
 
 type State struct {
 	LauncherPID          int               `json:"launcher_pid,omitempty"`
@@ -36,9 +40,12 @@ func Load(home string) (*State, error) {
 		return nil, fmt.Errorf("launcher home is required")
 	}
 	path := filepath.Join(home, "state.json")
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
+	data, exists, err := readProtectedFile(path, maxStateFileSize, "launcher state")
+	if err != nil {
 		return nil, err
+	}
+	if !exists {
+		data = nil
 	}
 	value := &State{Installed: make(map[string]string)}
 	if len(data) > 0 {
@@ -117,27 +124,9 @@ func reconcileSecret(home, name, current string, generate func() (string, error)
 }
 
 func readSecret(path string) (string, bool, error) {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	if !info.Mode().IsRegular() {
-		return "", false, fmt.Errorf("secret path is not a regular file")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return "", false, err
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxSecretFileSize+1))
-	if err != nil {
-		return "", false, err
-	}
-	if len(data) > maxSecretFileSize {
-		return "", false, fmt.Errorf("secret file exceeds %d bytes", maxSecretFileSize)
+	data, exists, err := readProtectedFile(path, maxSecretFileSize, "recovery secret")
+	if err != nil || !exists {
+		return "", exists, err
 	}
 	value := strings.TrimSpace(string(data))
 	if value == "" {
@@ -146,20 +135,44 @@ func readSecret(path string) (string, bool, error) {
 	return value, true, nil
 }
 
+func readProtectedFile(path string, limit int64, label string) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, fmt.Errorf("%s path is not a regular file", label)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return nil, false, fmt.Errorf("%s permissions must not allow group or other access", label)
+	}
+	if info.Size() > limit {
+		return nil, false, fmt.Errorf("%s file exceeds %d bytes", label, limit)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return nil, false, fmt.Errorf("%s changed while it was being opened", label)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return nil, false, fmt.Errorf("%s file exceeds %d bytes", label, limit)
+	}
+	return data, true, nil
+}
+
 func writeSecret(path, value string) error {
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, []byte(value+"\n"), 0o600); err != nil {
-		return err
-	}
-	if err := os.Chmod(temporary, 0o600); err != nil {
-		_ = os.Remove(temporary)
-		return err
-	}
-	if err := os.Rename(temporary, path); err != nil {
-		_ = os.Remove(temporary)
-		return err
-	}
-	return nil
+	return writeProtectedFile(path, []byte(value+"\n"))
 }
 
 func randomSecret(size int, label string) (string, error) {
@@ -171,16 +184,67 @@ func randomSecret(size int, label string) (string, error) {
 }
 
 func Save(home string, value *State) error {
+	if value == nil {
+		return fmt.Errorf("launcher state is required")
+	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(home, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
-	temporary := filepath.Join(home, "state.json.tmp")
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+	return writeProtectedFile(filepath.Join(home, "state.json"), data)
+}
+
+func writeProtectedFile(path string, data []byte) error {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
-	return os.Rename(temporary, filepath.Join(home, "state.json"))
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return err
+	}
+	if runtime.GOOS != "windows" {
+		directoryFile, err := os.Open(directory)
+		if err != nil {
+			return err
+		}
+		syncErr := directoryFile.Sync()
+		closeErr := directoryFile.Close()
+		if syncErr != nil {
+			return syncErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
 }

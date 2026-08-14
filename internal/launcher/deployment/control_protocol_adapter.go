@@ -16,6 +16,7 @@ type deviceAction = controlpkg.Action
 type deviceObservation = controlpkg.Observation
 type deviceProgress = controlpkg.Progress
 type deviceCancel = controlpkg.Cancel
+type deviceMessage = controlpkg.DeviceMessage
 
 var newDeviceProtocolID = controlpkg.NewID
 var decodeDeviceProtocol = controlpkg.DecodeStrict

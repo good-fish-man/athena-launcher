@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -57,5 +58,32 @@ func TestLoadRejectsSymlinkedRecoverySecret(t *testing.T) {
 	}
 	if _, err := Load(home); err == nil {
 		t.Fatal("symlinked recovery secret was accepted")
+	}
+}
+
+func TestLoadRejectsInsecureStatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not available")
+	}
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "state.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(home); err == nil {
+		t.Fatal("world-readable launcher state was accepted")
+	}
+}
+
+func TestLoadRejectsSymlinkedState(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "outside-state")
+	if err := os.WriteFile(target, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, "state.json")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := Load(home); err == nil {
+		t.Fatal("symlinked launcher state was accepted")
 	}
 }

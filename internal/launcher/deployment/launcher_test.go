@@ -194,7 +194,7 @@ func TestInstallRawArtifactAndChecksum(t *testing.T) {
 	}
 	sum := sha256.Sum256(content)
 	target := filepath.Join(home, "services", "test", "1.0.0")
-	artifact := Artifact{URL: source, SHA256: hex.EncodeToString(sum[:]), Format: "raw", Executable: "test-service"}
+	artifact := Artifact{URL: source, SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(content)), Format: "raw", Executable: "test-service"}
 	if err := installArtifact(context.Background(), home, target, artifact); err != nil {
 		t.Fatalf("install artifact: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestInstallBrowserUsesVerifiedRawArtifact(t *testing.T) {
 	manifest := &Manifest{Browser: &BrowserSpec{
 		Version: "0.33.1",
 		Artifacts: map[string]Artifact{platformKey(): {
-			URL: source, SHA256: hex.EncodeToString(sum[:]), Format: "raw", Executable: "agent-browser",
+			URL: source, SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(content)), Format: "raw", Executable: "agent-browser",
 		}},
 	}}
 	state := &launcherState{Installed: make(map[string]string), DBPassword: "test"}
@@ -235,6 +235,47 @@ func TestInstallBrowserUsesVerifiedRawArtifact(t *testing.T) {
 	}
 	if state.Installed["agent-browser"] != "0.33.1" {
 		t.Fatalf("browser version was not saved: %+v", state.Installed)
+	}
+}
+
+func TestReadLimitedRejectsTruncatedInput(t *testing.T) {
+	if _, err := readLimited(strings.NewReader("12345"), 4); err == nil {
+		t.Fatal("readLimited accepted input larger than its budget")
+	}
+}
+
+func TestDownloadFileRequiresExactDeclaredSize(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, "source")
+	target := filepath.Join(home, "target")
+	if err := os.WriteFile(source, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := downloadFile(context.Background(), source, target, 6); err == nil {
+		t.Fatal("downloadFile accepted a source that did not match the signed size")
+	}
+}
+
+func TestValidateDownloadURLRejectsCredentialsAndPrivateHTTPS(t *testing.T) {
+	for _, raw := range []string{"https://user:secret@example.com/file", "https://10.0.0.1/file"} {
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateDownloadURL(parsed); err == nil {
+			t.Fatalf("unsafe URL %q was accepted", raw)
+		}
+	}
+}
+
+func TestArchiveBudgetRejectsEntryAndExpandedLimits(t *testing.T) {
+	budget := archiveBudget{entries: maxArchiveEntries}
+	if err := budget.reserve(0); err == nil {
+		t.Fatal("archive entry count limit was not enforced")
+	}
+	budget = archiveBudget{bytes: maxArchiveExpandedBytes - 1}
+	if err := budget.reserve(2); err == nil {
+		t.Fatal("archive expanded byte limit was not enforced")
 	}
 }
 

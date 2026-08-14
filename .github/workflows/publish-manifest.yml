@@ -23,12 +23,6 @@ on:
         description: Oldest installed Athena version allowed to upgrade directly
         required: true
         default: 0.9.0
-      allow_unsigned_artifacts:
-        description: Emergency-only override while platform signing is unavailable
-        required: true
-        type: boolean
-        default: false
-
 permissions:
   contents: write
   actions: write
@@ -112,15 +106,17 @@ jobs:
           curl --fail --location --retry 3 "https://raw.githubusercontent.com/good-fish-man/athena-protocol/${SERVICE_TAG}/compatibility/v1.0.json" --output compatibility-v1.0.json
       - name: Enforce platform signing gate
         env:
-          ALLOW_UNSIGNED_ARTIFACTS: ${{ inputs.allow_unsigned_artifacts }}
           DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
           WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
+          LINUX_CODE_SIGNING_STATUS: ${{ vars.LINUX_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
         run: |
           set -euo pipefail
-          if { [ "$DARWIN_CODE_SIGNING_STATUS" = "UNAVAILABLE" ] || [ "$WINDOWS_CODE_SIGNING_STATUS" = "UNAVAILABLE" ]; } && [ "$ALLOW_UNSIGNED_ARTIFACTS" != "true" ]; then
-            echo "::error title=Unsigned release blocked::Configure macOS/Windows signing or explicitly approve the emergency unsigned override."
-            exit 1
-          fi
+          for status in "$DARWIN_CODE_SIGNING_STATUS" "$WINDOWS_CODE_SIGNING_STATUS" "$LINUX_CODE_SIGNING_STATUS"; do
+            case "$status" in
+              NOTARIZED|DEVELOPER_ID|AUTHENTICODE|GPG|COSIGN|PACKAGE_SIGNED|CHECKSUM_VERIFIED|THIRD_PARTY_UPSTREAM) ;;
+              *) echo "::error title=Unsigned release blocked::Unsupported or non-production signing status: $status"; exit 1 ;;
+            esac
+          done
       - name: Generate and sign supply-chain manifest
         env:
           ASSET_DIR: release-assets
@@ -130,6 +126,7 @@ jobs:
           ATHENA_RELEASE_PRIVATE_KEY: ${{ secrets.ATHENA_RELEASE_PRIVATE_KEY }}
           DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
           WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
+          LINUX_CODE_SIGNING_STATUS: ${{ vars.LINUX_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
         run: |
           test -n "$ATHENA_RELEASE_PRIVATE_KEY" || { echo "::error title=Missing release identity::ATHENA_RELEASE_PRIVATE_KEY is required"; exit 1; }
           ASSET_DIR=release-assets OUTPUT=release-sbom.spdx.json RELEASE_ID="athena-${TAG}" ./scripts/generate-release-sbom.sh

@@ -32,6 +32,9 @@ func completeDevelopmentManifest(manifest *Manifest) *Manifest {
 		if artifact.CodeSigning == "" {
 			artifact.CodeSigning = "DEVELOPMENT"
 		}
+		if artifact.SizeBytes <= 0 {
+			artifact.SizeBytes = 1
+		}
 		return artifact
 	}
 	for platform, artifact := range manifest.Database.Artifacts {

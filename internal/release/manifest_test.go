@@ -25,7 +25,7 @@ func TestSignedManifestRejectsTampering(t *testing.T) {
 	}
 	manifest.Services[0].Artifacts["darwin-arm64"] = Artifact{
 		URL: "https://attacker.example/runtime", SHA256: strings.Repeat("b", 64), SBOMSHA256: strings.Repeat("a", 64),
-		CodeSigning: "NOTARIZED", Signature: manifest.Services[0].Artifacts["darwin-arm64"].Signature,
+		SizeBytes: 2048, CodeSigning: "NOTARIZED", Signature: manifest.Services[0].Artifacts["darwin-arm64"].Signature,
 	}
 	if err := manifest.Verify(publicKey, time.Now().UTC()); err == nil {
 		t.Fatal("Verify() accepted a tampered artifact")
@@ -87,7 +87,7 @@ func TestGAManifestPinsCompatibilityAndComponentVersions(t *testing.T) {
 
 func testManifest(now time.Time) *Manifest {
 	hash := strings.Repeat("a", 64)
-	artifact := Artifact{URL: "https://releases.example/runtime.tar.gz", SHA256: hash, SBOMSHA256: hash, CodeSigning: "NOTARIZED", Format: "tar.gz", Executable: "agent-runtime"}
+	artifact := Artifact{URL: "https://releases.example/runtime.tar.gz", SHA256: hash, SizeBytes: 1024, SBOMSHA256: hash, CodeSigning: "NOTARIZED", Format: "tar.gz", Executable: "agent-runtime"}
 	return &Manifest{
 		Schema: ManifestSchema, ReleaseID: "athena-v0.9.0", Version: "0.9.0", ProtocolVersion: ProtocolVersion,
 		MinimumFromVersion: "0.8.0", SBOMURL: "https://releases.example/release-sbom.spdx.json", SBOMSHA256: hash,

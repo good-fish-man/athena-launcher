@@ -80,6 +80,7 @@ type ServiceSpec struct {
 type Artifact struct {
 	URL         string    `json:"url"`
 	SHA256      string    `json:"sha256"`
+	SizeBytes   int64     `json:"size_bytes"`
 	SBOMSHA256  string    `json:"sbom_sha256"`
 	Signature   Signature `json:"signature"`
 	CodeSigning string    `json:"code_signing"`
@@ -126,11 +127,11 @@ func (m *Manifest) Validate(platform string) error {
 	if databaseArtifact.URL == "" || databaseArtifact.SHA256 == "" {
 		return fmt.Errorf("database artifact for %s requires url and sha256", platform)
 	}
-	if err := validateArtifact(databaseArtifact, false); err != nil {
+	if err := validateArtifact(databaseArtifact, false, m.Development); err != nil {
 		return fmt.Errorf("database artifact for %s: %w", platform, err)
 	}
 	for candidatePlatform, artifact := range m.Database.Artifacts {
-		if err := validateArtifact(artifact, false); err != nil {
+		if err := validateArtifact(artifact, false, m.Development); err != nil {
 			return fmt.Errorf("database artifact for %s: %w", candidatePlatform, err)
 		}
 	}
@@ -142,11 +143,11 @@ func (m *Manifest) Validate(platform string) error {
 		if !ok {
 			return fmt.Errorf("browser does not provide an artifact for %s", platform)
 		}
-		if err := validateArtifact(artifact, true); err != nil {
+		if err := validateArtifact(artifact, true, m.Development); err != nil {
 			return fmt.Errorf("browser artifact for %s: %w", platform, err)
 		}
 		for candidatePlatform, candidate := range m.Browser.Artifacts {
-			if err := validateArtifact(candidate, true); err != nil {
+			if err := validateArtifact(candidate, true, m.Development); err != nil {
 				return fmt.Errorf("browser artifact for %s: %w", candidatePlatform, err)
 			}
 		}
@@ -170,11 +171,11 @@ func (m *Manifest) Validate(platform string) error {
 		if artifact.URL == "" || artifact.SHA256 == "" || artifact.Executable == "" {
 			return fmt.Errorf("service %s artifact for %s requires url, sha256, and executable", service.Name, platform)
 		}
-		if err := validateArtifact(artifact, true); err != nil {
+		if err := validateArtifact(artifact, true, m.Development); err != nil {
 			return fmt.Errorf("service %s artifact for %s: %w", service.Name, platform, err)
 		}
 		for candidatePlatform, candidate := range service.Artifacts {
-			if err := validateArtifact(candidate, true); err != nil {
+			if err := validateArtifact(candidate, true, m.Development); err != nil {
 				return fmt.Errorf("service %s artifact for %s: %w", service.Name, candidatePlatform, err)
 			}
 		}
@@ -184,11 +185,11 @@ func (m *Manifest) Validate(platform string) error {
 		if !ok {
 			return fmt.Errorf("frontend does not provide an artifact for %s", platform)
 		}
-		if err := validateArtifact(artifact, false); err != nil {
+		if err := validateArtifact(artifact, false, m.Development); err != nil {
 			return fmt.Errorf("frontend artifact for %s: %w", platform, err)
 		}
 		for candidatePlatform, candidate := range m.Frontend.Artifacts {
-			if err := validateArtifact(candidate, false); err != nil {
+			if err := validateArtifact(candidate, false, m.Development); err != nil {
 				return fmt.Errorf("frontend artifact for %s: %w", candidatePlatform, err)
 			}
 		}
@@ -240,18 +241,24 @@ func (m *Manifest) ValidateGA() error {
 	return nil
 }
 
-func validateArtifact(artifact Artifact, executableRequired bool) error {
+func validateArtifact(artifact Artifact, executableRequired, development bool) error {
 	if err := validateHTTPSURL(artifact.URL); err != nil {
 		return fmt.Errorf("url: %w", err)
 	}
 	if !validSHA256(artifact.SHA256) {
 		return fmt.Errorf("sha256 must be 64 hexadecimal characters")
 	}
+	if artifact.SizeBytes <= 0 {
+		return fmt.Errorf("size_bytes must be greater than zero")
+	}
 	if !validSHA256(artifact.SBOMSHA256) {
 		return fmt.Errorf("sbom_sha256 must be 64 hexadecimal characters")
 	}
-	if strings.TrimSpace(artifact.CodeSigning) == "" {
-		return fmt.Errorf("code_signing status is required")
+	if !validCodeSigning(artifact.CodeSigning) {
+		return fmt.Errorf("code_signing status %q is not supported", artifact.CodeSigning)
+	}
+	if !development && strings.EqualFold(strings.TrimSpace(artifact.CodeSigning), "DEVELOPMENT") {
+		return fmt.Errorf("production artifacts cannot use DEVELOPMENT code signing status")
 	}
 	if executableRequired {
 		if err := validateRelativePath(artifact.Executable, false); err != nil {
@@ -264,6 +271,15 @@ func validateArtifact(artifact Artifact, executableRequired bool) error {
 		return fmt.Errorf("unsupported format %q", artifact.Format)
 	}
 	return nil
+}
+
+func validCodeSigning(value string) bool {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "DEVELOPMENT", "NOTARIZED", "DEVELOPER_ID", "AUTHENTICODE", "GPG", "COSIGN", "PACKAGE_SIGNED", "CHECKSUM_VERIFIED", "THIRD_PARTY_UPSTREAM":
+		return true
+	default:
+		return false
+	}
 }
 
 const sha256Size = 32

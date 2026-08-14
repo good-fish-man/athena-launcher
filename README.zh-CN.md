@@ -216,6 +216,7 @@ make release VERSION=0.9.0 \
 - `darwin-arm64`、`windows-amd64` 等平台 Key。
 - HTTPS 下载地址。
 - 64 位十六进制 SHA-256。
+- 压缩产物的精确 `size_bytes`。
 - 压缩格式和可执行文件路径。
 - 服务启动顺序和健康检查地址。
 
@@ -254,11 +255,12 @@ GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Releas
 - 独立随机的内部服务令牌用于验证 Runtime 向 Client 创建定时任务的请求。
 - 稳定的本地 Ed25519 密钥用于签署私有 Capability Provider，Runtime 信任库只保存公钥。
 - Provider 包不可变，Runtime 只能获得 Registry 审批后的权限与资源子集。
-- 所有下载产物都必须匹配 SHA-256。
+- 所有下载产物都必须匹配 SHA-256、精确字节数、Artifact 签名和白名单平台签名证据。
 - 解压时拒绝绝对路径和 `..` 路径穿越。
+- 下载与解压会限制重定向、归档条目数、单文件大小和总展开大小。
 - 更新替换版本化安装目录，不删除 `~/.athena/data`。
 - 远程 Manifest 必须使用 HTTPS。
-- 公开发布时应保护 Manifest 写权限，并配置平台代码签名。
+- 生产发布只有在所有平台签名证据有效时才允许继续，不接受 unsigned override。
 
 ## 相关项目
 

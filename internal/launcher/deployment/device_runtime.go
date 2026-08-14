@@ -29,11 +29,14 @@ type deviceRuntime struct {
 	bridge   *desktopBridge
 	journal  string
 
-	mu        sync.Mutex
-	completed map[string]deviceObservation
-	inflight  map[string]context.CancelFunc
-	durable   map[string]journalAction
-	sequences map[string]int64
+	mu             sync.Mutex
+	completed      map[string]deviceObservation
+	inflight       map[string]context.CancelFunc
+	durable        map[string]journalAction
+	sequences      map[string]int64
+	leaseOwner     string
+	fencingToken   uint64
+	leaseExpiresAt time.Time
 }
 
 func newDeviceRuntime(state *launcherState, bridge *desktopBridge) (*deviceRuntime, error) {
@@ -173,6 +176,8 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 		return err
 	}
 	defer connection.Close()
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
 	connectionClosed := make(chan struct{})
 	defer close(connectionClosed)
 	if err := websocket.JSON.Send(connection, map[string]any{
@@ -183,6 +188,25 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 		return err
 	}
 	writer := &deviceWriter{connection: connection}
+	var welcomePayload string
+	if err := websocket.Message.Receive(connection, &welcomePayload); err != nil {
+		return fmt.Errorf("receive device lease: %w", err)
+	}
+	var welcome deviceMessage
+	if err := decodeDeviceProtocol([]byte(welcomePayload), &welcome); err != nil || welcome.Type != "WELCOME" || welcome.DeviceID != d.deviceID {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal([]byte(welcomePayload), &failure)
+		if strings.TrimSpace(failure.Error) != "" {
+			return fmt.Errorf("device registration rejected: %s", failure.Error)
+		}
+		return fmt.Errorf("device registration did not return a valid fenced lease")
+	}
+	if welcome.FencingToken > 0 && (welcome.LeaseOwner == "" || welcome.LeaseExpiresAt.IsZero()) {
+		return fmt.Errorf("device registration returned an incomplete fenced lease")
+	}
+	d.setLease(welcome.LeaseOwner, welcome.FencingToken, welcome.LeaseExpiresAt)
 	stopHeartbeat := make(chan struct{})
 	defer close(stopHeartbeat)
 	go func() {
@@ -193,13 +217,14 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 			case <-stopHeartbeat:
 				return
 			case <-ticker.C:
-				_ = writer.Send(map[string]any{"protocol": deviceProtocol, "type": "HEARTBEAT", "device_id": d.deviceID, "sent_at": time.Now().UTC()})
+				owner, token, expiresAt := d.currentLease()
+				_ = writer.Send(deviceMessage{Protocol: deviceProtocol, Type: "HEARTBEAT", DeviceID: d.deviceID, LeaseOwner: owner, FencingToken: token, LeaseExpiresAt: expiresAt, SentAt: time.Now().UTC()})
 			}
 		}
 	}()
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-connectionCtx.Done():
 			_ = connection.Close()
 		case <-connectionClosed:
 		}
@@ -217,12 +242,22 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 			continue
 		}
 		switch envelope.Type {
+		case "HEARTBEAT_ACK":
+			var heartbeat deviceMessage
+			if err := decodeDeviceProtocol([]byte(payload), &heartbeat); err != nil {
+				return fmt.Errorf("decode heartbeat lease: %w", err)
+			}
+			owner, token, _ := d.currentLease()
+			if heartbeat.LeaseOwner != owner || heartbeat.FencingToken != token {
+				return fmt.Errorf("control plane changed the device fencing token")
+			}
+			d.setLease(owner, token, heartbeat.LeaseExpiresAt)
 		case "ACTION":
 			var action deviceAction
 			if err := decodeDeviceProtocol([]byte(payload), &action); err != nil {
 				continue
 			}
-			go d.runAction(ctx, writer, action)
+			go d.runAction(connectionCtx, writer, action)
 		case "CANCEL":
 			var cancel deviceCancel
 			if err := decodeDeviceProtocol([]byte(payload), &cancel); err == nil {
@@ -230,6 +265,28 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 			}
 		}
 	}
+}
+
+func (d *deviceRuntime) setLease(owner string, token uint64, expiresAt time.Time) {
+	d.mu.Lock()
+	d.leaseOwner = owner
+	d.fencingToken = token
+	d.leaseExpiresAt = expiresAt
+	d.mu.Unlock()
+}
+
+func (d *deviceRuntime) currentLease() (string, uint64, time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.leaseOwner, d.fencingToken, d.leaseExpiresAt
+}
+
+func (d *deviceRuntime) acceptsLease(action deviceAction) bool {
+	owner, token, expiresAt := d.currentLease()
+	if token == 0 {
+		return action.FencingToken == 0 && action.LeaseOwner == ""
+	}
+	return action.LeaseOwner == owner && action.FencingToken == token && expiresAt.After(time.Now())
 }
 
 func (d *deviceRuntime) probeDeviceEndpoint(ctx context.Context, endpoint string) string {
@@ -265,6 +322,17 @@ func (d *deviceRuntime) probeDeviceEndpoint(ctx context.Context, endpoint string
 }
 
 func (d *deviceRuntime) runAction(parent context.Context, writer *deviceWriter, action deviceAction) {
+	if !d.acceptsLease(action) {
+		_ = writer.Send(deviceObservation{
+			Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
+			TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
+			LeaseOwner: action.LeaseOwner, FencingToken: action.FencingToken,
+			AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
+			SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
+			Status: "FAILED", FinishedAt: time.Now().UTC(), ObservedAt: time.Now().UTC(), Error: "action fencing token is stale or expired",
+		})
+		return
+	}
 	ctx, cancel := context.WithCancel(parent)
 	d.mu.Lock()
 	if _, exists := d.inflight[action.ActionID]; exists {
@@ -273,6 +341,7 @@ func (d *deviceRuntime) runAction(parent context.Context, writer *deviceWriter, 
 		_ = writer.Send(deviceObservation{
 			Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
 			TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
+			LeaseOwner: action.LeaseOwner, FencingToken: action.FencingToken,
 			AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
 			SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
 			Status: "FAILED", FinishedAt: time.Now().UTC(), ObservedAt: time.Now().UTC(), Error: "action is already running",
@@ -288,6 +357,9 @@ func (d *deviceRuntime) runAction(parent context.Context, writer *deviceWriter, 
 		d.mu.Unlock()
 	}()
 	observation := d.execute(ctx, action, func(progress deviceProgress) {
+		progress.DeviceID = d.deviceID
+		progress.LeaseOwner = action.LeaseOwner
+		progress.FencingToken = action.FencingToken
 		if err := writer.Send(progress); err != nil && parent.Err() == nil {
 			fmt.Printf("[device-runtime] send progress %s: %v\n", action.ActionID, err)
 		}
@@ -356,6 +428,7 @@ func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progre
 	base := deviceObservation{
 		Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
 		TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
+		LeaseOwner: action.LeaseOwner, FencingToken: action.FencingToken,
 		TraceID: action.TraceID, AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
 		SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
 		StartedAt: startedAt, ObservedAt: startedAt,
@@ -375,6 +448,10 @@ func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progre
 		base.Status, base.Error = "FAILED", "invalid action envelope: "+err.Error()
 		return base
 	}
+	if !d.acceptsLease(action) {
+		base.Status, base.Error = "FAILED", "action fencing token is stale or expired"
+		return base
+	}
 	if action.CapabilityInstanceID != "" && action.CapabilityInstanceID != d.capabilityInstanceID(action.Capability) {
 		base.Status, base.Error = "FAILED", "capability instance does not belong to this device runtime"
 		return base
@@ -387,6 +464,9 @@ func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progre
 	d.mu.Lock()
 	if completed, ok := d.completed[action.IdempotencyKey]; ok {
 		d.mu.Unlock()
+		completed.DeviceID = d.deviceID
+		completed.LeaseOwner = action.LeaseOwner
+		completed.FencingToken = action.FencingToken
 		return completed
 	}
 	d.mu.Unlock()
