@@ -13,6 +13,8 @@ Launcher 1.0 是桌面外壳、安装包校验器、本地服务 Supervisor、�
 
 正式 1.0 Manifest 必须固定协议 `1.0.0`、组件版本、各平台产物 URL/SHA-256，以及 `compatibility/v1.0.json` 的 URL/SHA-256。组件缺失、兼容矩阵不一致、升级来源不支持或 Hash 校验失败时，Launcher 会在替换服务前拒绝升级。
 
+Release Manifest 与兼容矩阵采用严格 JSON 解码：未知字段、多个 JSON 值、重复组件，以及 Protocol、Runtime、Runtime Client、Launcher、UI 中任一版本不一致都会失败关闭。只有矩阵原始字节与签名 Manifest 固定的 Hash 一致后，Launcher 才会信任其内容。
+
 支持原地升级的来源是 `0.9.0`。更老版本必须制定显式迁移方案，不能静默尽力升级。
 
 ## 安全升级
@@ -24,6 +26,8 @@ Launcher 1.0 是桌面外壳、安装包校验器、本地服务 Supervisor、�
 5. 只有全部验证成功后才停止 Launcher 管理的进程。
 6. 原子切换新包，执行 Health/Readiness，并保留上一版本用于回滚。
 7. 健康检查失败时恢复上一套程序；只有数据迁移确有需要时，才从独立验证过的备份恢复数据。
+
+Runtime Client 迁移保持增量与幂等；发布回归测试会确认代表性的 v0.9 用户、会话和记忆记录在 v1.0 初始化后仍然存在。程序回滚不会删除 PostgreSQL 数据目录。
 
 替换 PostgreSQL 程序包不会删除 `~/.athena/data/postgres`。备份密钥独立于自动生成的服务配置。
 

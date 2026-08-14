@@ -20,6 +20,12 @@ platform artifact URLs and SHA-256 values, and the URL/SHA-256 of
 compatibility matrix, unsupported upgrade sources, or failed hashes before
 service replacement.
 
+Release Manifest and compatibility JSON are decoded strictly: unknown fields,
+multiple JSON values, duplicate component identities, or any mismatch among
+Protocol, Runtime, Runtime Client, Launcher, and UI versions fail closed. The
+matrix bytes must match the signed Manifest hash before their contents are
+trusted.
+
 The supported in-place source is `0.9.0`. Older installations require an
 explicit migration plan rather than an implicit best-effort upgrade.
 
@@ -34,6 +40,11 @@ explicit migration plan rather than an implicit best-effort upgrade.
    retain the previous set for rollback.
 7. If health fails, restore the previous package set. Restore data only from a
    separately verified backup when a data migration requires it.
+
+Runtime Client migrations are additive and idempotent. The release regression
+test verifies that representative v0.9 user, conversation, and memory rows
+survive the v1.0 schema initialization. Program rollback never deletes the
+PostgreSQL data directory.
 
 PostgreSQL package replacement does not delete `~/.athena/data/postgres`.
 Backups are encrypted independently of generated service configuration.

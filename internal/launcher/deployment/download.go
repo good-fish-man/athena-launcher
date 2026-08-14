@@ -3,6 +3,7 @@ package deployment
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
@@ -42,7 +43,7 @@ func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 		return nil, fmt.Errorf("load release manifest %s: %w", source, err)
 	}
 	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	if err := decodeStrictJSON(data, &manifest); err != nil {
 		return nil, fmt.Errorf("parse release manifest: %w", err)
 	}
 	if err := manifest.Validate(platformKey()); err != nil {
@@ -82,12 +83,16 @@ func verifyReleaseCompatibility(ctx context.Context, manifest *Manifest) error {
 	if err != nil {
 		return fmt.Errorf("download release compatibility matrix: %w", err)
 	}
+	return verifyReleaseCompatibilityData(data, manifest)
+}
+
+func verifyReleaseCompatibilityData(data []byte, manifest *Manifest) error {
 	digest := sha256.Sum256(data)
 	if !strings.EqualFold(hex.EncodeToString(digest[:]), manifest.CompatibilitySHA256) {
 		return fmt.Errorf("release compatibility matrix SHA-256 mismatch")
 	}
 	var matrix ga.CompatibilityMatrix
-	if err := json.Unmarshal(data, &matrix); err != nil {
+	if err := decodeStrictJSON(data, &matrix); err != nil {
 		return fmt.Errorf("parse release compatibility matrix: %w", err)
 	}
 	if err := matrix.Validate(); err != nil {
@@ -96,17 +101,42 @@ func verifyReleaseCompatibility(ctx context.Context, manifest *Manifest) error {
 	if matrix.ReleaseVersion != manifest.Version || matrix.ProtocolVersion != manifest.ProtocolVersion || matrix.MinimumUpgradeVersion != strings.TrimPrefix(manifest.MinimumFromVersion, "v") {
 		return fmt.Errorf("release compatibility matrix does not match manifest versions")
 	}
-	componentVersions := map[string]string{"athena-launcher": manifest.Version}
+	componentVersions := map[string]string{
+		"athena-protocol": manifest.ProtocolVersion,
+		"athena-launcher": manifest.Version,
+	}
 	for _, service := range manifest.Services {
+		if _, duplicate := componentVersions[service.Name]; duplicate {
+			return fmt.Errorf("manifest component %s is duplicated", service.Name)
+		}
 		componentVersions[service.Name] = strings.TrimPrefix(service.Version, "v")
 	}
 	if manifest.Frontend != nil {
 		componentVersions["agent-ui"] = strings.TrimPrefix(manifest.Frontend.Version, "v")
 	}
 	for _, component := range matrix.Components {
-		if actual, ok := componentVersions[component.Component]; ok && strings.TrimPrefix(component.Version, "v") != actual {
+		actual, ok := componentVersions[component.Component]
+		if !ok {
+			return fmt.Errorf("manifest is missing compatibility component %s", component.Component)
+		}
+		if strings.TrimPrefix(component.Version, "v") != actual {
 			return fmt.Errorf("component %s version %s does not match manifest version %s", component.Component, component.Version, actual)
 		}
+	}
+	return nil
+}
+
+func decodeStrictJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values are not allowed")
+		}
+		return err
 	}
 	return nil
 }
