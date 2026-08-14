@@ -18,6 +18,10 @@ func writeGeneratedConfigs(home string, state *launcherState, executables map[st
 	dataDir := filepath.Join(home, "data")
 	uploadsDir := filepath.Join(dataDir, "uploads")
 	userSkillsDir := filepath.Join(dataDir, "skills")
+	pluginPaths, err := ensurePluginRegistry(home)
+	if err != nil {
+		return nil, err
+	}
 	for _, directory := range []string{configDir, uploadsDir, userSkillsDir, filepath.Join(home, "logs")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, err
@@ -49,6 +53,12 @@ control:
 scheduled_task:
   scan_interval_sec: 60
 
+plugins:
+  directory: %s
+  registry_path: %s
+  trust_store_path: %s
+  audit_path: %s
+
 log:
   level: "info"
 
@@ -71,6 +81,7 @@ paths:
   skills_config_file: %s
   uploads_dir: %s
 `, defaultClientHTTPPort, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort, yamlString(state.InternalServiceToken),
+		yamlString(pluginPaths.packages), yamlString(pluginPaths.registry), yamlString(pluginPaths.trustStore), yamlString(pluginPaths.audit),
 		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), defaultDatabasePort, yamlString(defaultDatabaseName),
 		yamlString(paths.clientConfig), yamlString(paths.skillsConfig), yamlString(uploadsDir))
 	runtimeYAML := fmt.Sprintf(`server:
@@ -113,9 +124,18 @@ skills:
   dir: %s
   config_path: %s
   global_dir: %s
+
+plugins:
+  enabled: true
+  require_signature: true
+  dir: %s
+  registry_path: %s
+  trust_store_path: %s
+  audit_path: %s
 `, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort,
 		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), defaultDatabasePort, yamlString(defaultDatabaseName),
-		yamlString(userSkillsDir), yamlString(paths.skillsConfig), yamlString(runtimeSkillsDir))
+		yamlString(userSkillsDir), yamlString(paths.skillsConfig), yamlString(runtimeSkillsDir),
+		yamlString(pluginPaths.packages), yamlString(pluginPaths.registry), yamlString(pluginPaths.trustStore), yamlString(pluginPaths.audit))
 	if err := writeAtomic(paths.clientConfig, []byte(clientYAML), 0o600); err != nil {
 		return nil, err
 	}

@@ -177,6 +177,15 @@ If a port is occupied by a process recorded as Athena's managed process, the lau
 
 To reset only downloaded service packages, stop Athena and remove the relevant version under `~/.athena/services` or `~/.athena/packages`; do not remove `~/.athena/data` unless user data should also be erased.
 
+Launcher also provisions the shared v0.8 Provider Registry under
+`~/.athena/plugins`. On first installation it creates a stable local Ed25519
+identity, an empty Registry, and shared package/audit directories, then writes
+the same paths into Runtime and Runtime Client configuration. Service or package
+updates never rotate that identity. Back up the mode-`0600`
+`signing/private-key.json`; deleting it prevents signing new local Provider
+versions but does not make existing signatures trustworthy under a replacement
+key.
+
 ## Build from Source
 
 Requirements: Go 1.24 or newer. Desktop builds use Wails v2; Linux builds also require the GTK3 and WebKit2GTK 4.1 development packages.
@@ -244,6 +253,10 @@ Repository-scoped GitHub tokens cannot create releases in the other repositories
 - The generated database password is stored in mode `0600` configuration/state files.
 - A stable agent-browser vault key is generated once in the mode `0600` launcher state and reused across service and package updates.
 - A separate random internal-service token authenticates Runtime-to-Client scheduled-task requests.
+- A stable local Ed25519 key signs private Capability Providers; only its public
+  key is placed in the Runtime trust store.
+- Provider packages are immutable and Runtime receives only Registry-approved
+  permission/resource subsets.
 - Artifact hashes are mandatory.
 - Archive extraction rejects absolute paths and `..` traversal.
 - Updates replace versioned installation directories, not `~/.athena/data`.

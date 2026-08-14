@@ -177,6 +177,12 @@ export ATHENA_MANIFEST_URL="https://example.com/release-manifest.json"
 
 如果只想重置下载的服务包，应先停止 Athena，再删除 `~/.athena/services` 或 `~/.athena/packages` 中对应版本；除非希望同时清除用户数据，否则不要删除 `~/.athena/data`。
 
+Launcher 还会在 `~/.athena/plugins` 初始化 v0.8 共享 Provider Registry。
+首次安装时只生成一次本地 Ed25519 身份、空 Registry、包目录和审计目录，并将
+同一组路径写入 Runtime 与 Runtime Client 配置。服务或安装包升级不会轮换该
+身份。请备份权限为 `0600` 的 `signing/private-key.json`；删除它会导致无法
+签署新的本地 Provider 版本，使用替代密钥也不会让旧签名自动获得信任。
+
 ## 从源码构建
 
 需要 Go 1.24 或更高版本。桌面构建使用 Wails v2；Linux 构建还需要 GTK3 和 WebKit2GTK 4.1 开发包。
@@ -244,6 +250,8 @@ GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Releas
 - 随机数据库密码保存在权限为 `0600` 的配置/状态文件中。
 - agent-browser Vault 加密密钥只生成一次并保存在权限为 `0600` 的 Launcher 状态文件中，服务和安装包更新后继续复用。
 - 独立随机的内部服务令牌用于验证 Runtime 向 Client 创建定时任务的请求。
+- 稳定的本地 Ed25519 密钥用于签署私有 Capability Provider，Runtime 信任库只保存公钥。
+- Provider 包不可变，Runtime 只能获得 Registry 审批后的权限与资源子集。
 - 所有下载产物都必须匹配 SHA-256。
 - 解压时拒绝绝对路径和 `..` 路径穿越。
 - 更新替换版本化安装目录，不删除 `~/.athena/data`。
