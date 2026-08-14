@@ -20,6 +20,7 @@ import (
 	"time"
 
 	releasepkg "athena-launcher/internal/release"
+	ga "github.com/good-fish-man/athena-protocol/protocol/ga/v1"
 )
 
 var downloadClient = &http.Client{Timeout: 30 * time.Minute}
@@ -38,6 +39,9 @@ func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 	if err := manifest.Validate(platformKey()); err != nil {
 		return nil, err
 	}
+	if err := manifest.ValidateGA(); err != nil {
+		return nil, err
+	}
 	remote := remoteManifestSource(source)
 	if remote && manifest.Development {
 		return nil, fmt.Errorf("remote release manifest cannot use development mode")
@@ -54,9 +58,72 @@ func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 			if err := verifyReleaseSBOM(ctx, &manifest); err != nil {
 				return nil, err
 			}
+			if compareReleaseSemver(manifest.Version, ga.ReleaseVersion) >= 0 {
+				if err := verifyReleaseCompatibility(ctx, &manifest); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	return &manifest, nil
+}
+
+func verifyReleaseCompatibility(ctx context.Context, manifest *Manifest) error {
+	data, err := readSource(ctx, manifest.CompatibilityURL, 4<<20)
+	if err != nil {
+		return fmt.Errorf("download release compatibility matrix: %w", err)
+	}
+	digest := sha256.Sum256(data)
+	if !strings.EqualFold(hex.EncodeToString(digest[:]), manifest.CompatibilitySHA256) {
+		return fmt.Errorf("release compatibility matrix SHA-256 mismatch")
+	}
+	var matrix ga.CompatibilityMatrix
+	if err := json.Unmarshal(data, &matrix); err != nil {
+		return fmt.Errorf("parse release compatibility matrix: %w", err)
+	}
+	if err := matrix.Validate(); err != nil {
+		return fmt.Errorf("validate release compatibility matrix: %w", err)
+	}
+	if matrix.ReleaseVersion != manifest.Version || matrix.ProtocolVersion != manifest.ProtocolVersion || matrix.MinimumUpgradeVersion != strings.TrimPrefix(manifest.MinimumFromVersion, "v") {
+		return fmt.Errorf("release compatibility matrix does not match manifest versions")
+	}
+	componentVersions := map[string]string{"athena-launcher": manifest.Version}
+	for _, service := range manifest.Services {
+		componentVersions[service.Name] = strings.TrimPrefix(service.Version, "v")
+	}
+	if manifest.Frontend != nil {
+		componentVersions["agent-ui"] = strings.TrimPrefix(manifest.Frontend.Version, "v")
+	}
+	for _, component := range matrix.Components {
+		if actual, ok := componentVersions[component.Component]; ok && strings.TrimPrefix(component.Version, "v") != actual {
+			return fmt.Errorf("component %s version %s does not match manifest version %s", component.Component, component.Version, actual)
+		}
+	}
+	return nil
+}
+
+func compareReleaseSemver(left, right string) int {
+	parse := func(value string) [3]int {
+		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+		value = strings.SplitN(value, "-", 2)[0]
+		value = strings.SplitN(value, "+", 2)[0]
+		parts := strings.Split(value, ".")
+		var result [3]int
+		for i := 0; i < len(result) && i < len(parts); i++ {
+			fmt.Sscan(parts[i], &result[i])
+		}
+		return result
+	}
+	l, r := parse(left), parse(right)
+	for index := range l {
+		if l[index] < r[index] {
+			return -1
+		}
+		if l[index] > r[index] {
+			return 1
+		}
+	}
+	return 0
 }
 
 func configuredReleasePublicKey() (ed25519.PublicKey, error) {

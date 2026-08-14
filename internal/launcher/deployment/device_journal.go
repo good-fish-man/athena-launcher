@@ -14,6 +14,8 @@ type journalAction struct {
 	TaskID         string    `json:"task_id"`
 	StepID         string    `json:"step_id"`
 	ActionID       string    `json:"action_id"`
+	AgentBuildID   string    `json:"agent_build_id,omitempty"`
+	RunManifestID  string    `json:"run_manifest_id,omitempty"`
 	Sequence       int64     `json:"sequence"`
 	Revision       int64     `json:"revision"`
 	IdempotencyKey string    `json:"idempotency_key"`
@@ -61,6 +63,7 @@ func loadDeviceActionJournal(path string) (deviceActionJournal, error) {
 		observation := deviceObservation{
 			Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
 			TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID,
+			AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
 			Sequence: action.Sequence, Revision: action.Revision, Status: "FAILED",
 			StartedAt: action.StartedAt, FinishedAt: now, ObservedAt: now,
 			State: map[string]any{"outcome": "unknown", "verification_required": true},
@@ -119,6 +122,7 @@ func (d *deviceRuntime) beginDurableAction(action deviceAction) error {
 	}
 	d.durable[action.IdempotencyKey] = journalAction{
 		TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID,
+		AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
 		Sequence: action.Sequence, Revision: action.Revision, IdempotencyKey: action.IdempotencyKey,
 		StartedAt: time.Now().UTC(),
 	}

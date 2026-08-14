@@ -1,14 +1,15 @@
 #!/usr/bin/env sh
 set -eu
 
-TAG=${TAG:-v0.9.0}
+TAG=${TAG:-v1.0.0}
 LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
 AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.33.1}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
 SBOM_FILE=${SBOM_FILE:-release-sbom.spdx.json}
-MINIMUM_FROM_VERSION=${MINIMUM_FROM_VERSION:-0.8.0}
+COMPATIBILITY_FILE=${COMPATIBILITY_FILE:-compatibility-v1.0.json}
+MINIMUM_FROM_VERSION=${MINIMUM_FROM_VERSION:-0.9.0}
 DARWIN_CODE_SIGNING_STATUS=${DARWIN_CODE_SIGNING_STATUS:-UNAVAILABLE}
 WINDOWS_CODE_SIGNING_STATUS=${WINDOWS_CODE_SIGNING_STATUS:-UNAVAILABLE}
 LINUX_CODE_SIGNING_STATUS=${LINUX_CODE_SIGNING_STATUS:-CHECKSUM_VERIFIED}
@@ -33,6 +34,11 @@ fi
 
 if [ ! -f "$SBOM_FILE" ]; then
   echo "release SBOM is required: $SBOM_FILE" >&2
+  exit 1
+fi
+
+if [ ! -f "$COMPATIBILITY_FILE" ]; then
+  echo "release compatibility matrix is required: $COMPATIBILITY_FILE" >&2
   exit 1
 fi
 
@@ -96,10 +102,12 @@ jq -n \
 	--arg schema "athena.release-manifest.v1" \
 	--arg release_id "athena-$TAG" \
 	--arg version "${TAG#v}" \
-	--arg protocol_version "athena.operations.v1" \
+	--arg protocol_version "1.0.0" \
 	--arg minimum_from_version "$MINIMUM_FROM_VERSION" \
 	--arg sbom_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "release-sbom.spdx.json")" \
 	--arg sbom_sha "$(sha256 "$SBOM_FILE")" \
+	--arg compatibility_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "compatibility-v1.0.json")" \
+	--arg compatibility_sha "$(sha256 "$COMPATIBILITY_FILE")" \
 	--arg issued_at "$ISSUED_AT" \
 	--arg expires_at "$EXPIRES_AT" \
 	--arg darwin_signing "$DARWIN_CODE_SIGNING_STATUS" \
@@ -143,6 +151,8 @@ jq -n \
 	  minimum_from_version: $minimum_from_version,
 	  sbom_url: $sbom_url,
 	  sbom_sha256: $sbom_sha,
+	  compatibility_url: $compatibility_url,
+	  compatibility_sha256: $compatibility_sha,
 	  signature: {algorithm:"Ed25519",key_id:"",value:""},
 	  issued_at: $issued_at,
 	  expires_at: $expires_at,
@@ -168,6 +178,7 @@ jq -n \
       }
     },
     frontend: {
+      version: $version,
       listen_addr: "127.0.0.1:3000",
       root: "",
       artifacts: {
@@ -181,6 +192,7 @@ jq -n \
     services: [
       {
         name: "agent-runtime",
+        version: $version,
         order: 10,
         health_url: "http://127.0.0.1:18081/healthz",
         artifacts: {
@@ -193,6 +205,7 @@ jq -n \
       },
       {
         name: "agent-runtime-client",
+        version: $version,
         order: 20,
         health_url: "http://127.0.0.1:8090/healthz",
         artifacts: {

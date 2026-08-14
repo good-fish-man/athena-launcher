@@ -16,12 +16,13 @@ import (
 	"strings"
 	"time"
 
+	ga "github.com/good-fish-man/athena-protocol/protocol/ga/v1"
 	operationsv1 "github.com/good-fish-man/athena-protocol/protocol/operations/v1"
 )
 
 const (
 	ManifestSchema  = "athena.release-manifest.v1"
-	ProtocolVersion = "athena.operations.v1"
+	ProtocolVersion = ga.ProtocolVersion
 )
 
 var semverPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
@@ -29,21 +30,23 @@ var semverPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za
 type Signature = operationsv1.Signature
 
 type Manifest struct {
-	Schema             string        `json:"schema"`
-	ReleaseID          string        `json:"release_id"`
-	Version            string        `json:"version"`
-	ProtocolVersion    string        `json:"protocol_version"`
-	MinimumFromVersion string        `json:"minimum_from_version"`
-	Development        bool          `json:"development,omitempty"`
-	SBOMURL            string        `json:"sbom_url"`
-	SBOMSHA256         string        `json:"sbom_sha256"`
-	Signature          Signature     `json:"signature"`
-	IssuedAt           time.Time     `json:"issued_at"`
-	ExpiresAt          time.Time     `json:"expires_at"`
-	Database           DatabaseSpec  `json:"database"`
-	Browser            *BrowserSpec  `json:"browser,omitempty"`
-	Services           []ServiceSpec `json:"services"`
-	Frontend           *FrontendSpec `json:"frontend,omitempty"`
+	Schema              string        `json:"schema"`
+	ReleaseID           string        `json:"release_id"`
+	Version             string        `json:"version"`
+	ProtocolVersion     string        `json:"protocol_version"`
+	MinimumFromVersion  string        `json:"minimum_from_version"`
+	Development         bool          `json:"development,omitempty"`
+	SBOMURL             string        `json:"sbom_url"`
+	SBOMSHA256          string        `json:"sbom_sha256"`
+	CompatibilityURL    string        `json:"compatibility_url,omitempty"`
+	CompatibilitySHA256 string        `json:"compatibility_sha256,omitempty"`
+	Signature           Signature     `json:"signature"`
+	IssuedAt            time.Time     `json:"issued_at"`
+	ExpiresAt           time.Time     `json:"expires_at"`
+	Database            DatabaseSpec  `json:"database"`
+	Browser             *BrowserSpec  `json:"browser,omitempty"`
+	Services            []ServiceSpec `json:"services"`
+	Frontend            *FrontendSpec `json:"frontend,omitempty"`
 }
 
 type BrowserSpec struct {
@@ -52,6 +55,7 @@ type BrowserSpec struct {
 }
 
 type FrontendSpec struct {
+	Version    string              `json:"version,omitempty"`
 	ListenAddr string              `json:"listen_addr,omitempty"`
 	Root       string              `json:"root,omitempty"`
 	Artifacts  map[string]Artifact `json:"artifacts"`
@@ -65,6 +69,7 @@ type DatabaseSpec struct {
 
 type ServiceSpec struct {
 	Name      string              `json:"name"`
+	Version   string              `json:"version,omitempty"`
 	Order     int                 `json:"order"`
 	Args      []string            `json:"args,omitempty"`
 	Env       map[string]string   `json:"env,omitempty"`
@@ -192,6 +197,46 @@ func (m *Manifest) Validate(platform string) error {
 		}
 	}
 	sort.SliceStable(m.Services, func(i, j int) bool { return m.Services[i].Order < m.Services[j].Order })
+	return nil
+}
+
+// ValidateGA applies the stable v1.0 compatibility gates. Legacy v0.9
+// manifests remain readable only so an installed v0.9 release can be upgraded;
+// newly published v1 manifests must satisfy every requirement below.
+func (m *Manifest) ValidateGA() error {
+	if m == nil {
+		return fmt.Errorf("manifest is required")
+	}
+	if compareSemver(m.Version, ga.ReleaseVersion) < 0 {
+		return nil
+	}
+	if m.ProtocolVersion != ga.ProtocolVersion {
+		return fmt.Errorf("GA manifest protocol_version must be %s", ga.ProtocolVersion)
+	}
+	if !m.AllowsUpgradeFrom("0.9.0") {
+		return fmt.Errorf("GA manifest must support an in-place upgrade from 0.9.0")
+	}
+	if err := validateHTTPSURL(m.CompatibilityURL); err != nil {
+		return fmt.Errorf("manifest compatibility_url: %w", err)
+	}
+	if !validSHA256(m.CompatibilitySHA256) {
+		return fmt.Errorf("manifest compatibility_sha256 must be 64 hexadecimal characters")
+	}
+	services := map[string]bool{}
+	for _, service := range m.Services {
+		if !semverPattern.MatchString(service.Version) {
+			return fmt.Errorf("service %s must pin a semantic version", service.Name)
+		}
+		services[service.Name] = true
+	}
+	for _, required := range []string{"agent-runtime", "agent-runtime-client"} {
+		if !services[required] {
+			return fmt.Errorf("GA manifest is missing required service %s", required)
+		}
+	}
+	if m.Frontend == nil || !semverPattern.MatchString(m.Frontend.Version) {
+		return fmt.Errorf("GA manifest must pin the frontend semantic version")
+	}
 	return nil
 }
 

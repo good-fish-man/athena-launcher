@@ -273,6 +273,7 @@ func (d *deviceRuntime) runAction(parent context.Context, writer *deviceWriter, 
 		_ = writer.Send(deviceObservation{
 			Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
 			TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
+			AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
 			SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
 			Status: "FAILED", FinishedAt: time.Now().UTC(), ObservedAt: time.Now().UTC(), Error: "action is already running",
 		})
@@ -355,7 +356,8 @@ func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progre
 	base := deviceObservation{
 		Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
 		TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
-		TraceID: action.TraceID, SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
+		TraceID: action.TraceID, AgentBuildID: action.AgentBuildID, RunManifestID: action.RunManifestID,
+		SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
 		StartedAt: startedAt, ObservedAt: startedAt,
 	}
 	defer func() {

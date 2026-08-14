@@ -3,7 +3,7 @@ set -eu
 
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-sbom.spdx.json}
-RELEASE_ID=${RELEASE_ID:-athena-${TAG:-v0.9.0}}
+RELEASE_ID=${RELEASE_ID:-athena-${TAG:-v1.0.0}}
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2

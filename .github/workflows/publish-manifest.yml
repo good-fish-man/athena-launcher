@@ -6,11 +6,11 @@ on:
       tag:
         description: Runtime, client, and frontend release tag
         required: true
-        default: v0.9.0
+        default: v1.0.0
       launcher_tag:
         description: Launcher release receiving the manifest and PostgreSQL assets
         required: true
-        default: v0.9.0
+        default: v1.0.0
       postgres_version:
         description: PostgreSQL binary version
         required: true
@@ -22,7 +22,7 @@ on:
       minimum_from_version:
         description: Oldest installed Athena version allowed to upgrade directly
         required: true
-        default: 0.8.0
+        default: 0.9.0
       allow_unsigned_artifacts:
         description: Emergency-only override while platform signing is unavailable
         required: true
@@ -50,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for repo in agent-runtime agent-runtime-client athena-agent-ui; do
+          for repo in agent-runtime agent-runtime-client athena-agent-ui athena-protocol; do
             if ! gh release view "$SERVICE_TAG" --repo "good-fish-man/$repo" >/dev/null 2>&1; then
               echo "::error title=Missing service release::good-fish-man/$repo has no GitHub Release named $SERVICE_TAG"
               echo "Create it with: gh workflow run release.yml -R good-fish-man/$repo --ref main -f tag=$SERVICE_TAG"
@@ -109,6 +109,7 @@ jobs:
           gh release download "$SERVICE_TAG" --repo good-fish-man/agent-runtime-client --pattern "agent-runtime-client_${SERVICE_TAG}_*" --dir release-assets
           gh release download "$SERVICE_TAG" --repo good-fish-man/athena-agent-ui --pattern "athena-agent-ui_${SERVICE_TAG}.tar.gz" --dir release-assets
           gh release download "v$AGENT_BROWSER_VERSION" --repo vercel-labs/agent-browser --pattern "agent-browser-darwin-arm64" --pattern "agent-browser-darwin-x64" --pattern "agent-browser-linux-arm64" --pattern "agent-browser-linux-x64" --pattern "agent-browser-win32-x64.exe" --dir release-assets
+          curl --fail --location --retry 3 "https://raw.githubusercontent.com/good-fish-man/athena-protocol/${SERVICE_TAG}/compatibility/v1.0.json" --output compatibility-v1.0.json
       - name: Enforce platform signing gate
         env:
           ALLOW_UNSIGNED_ARTIFACTS: ${{ inputs.allow_unsigned_artifacts }}
@@ -132,23 +133,24 @@ jobs:
         run: |
           test -n "$ATHENA_RELEASE_PRIVATE_KEY" || { echo "::error title=Missing release identity::ATHENA_RELEASE_PRIVATE_KEY is required"; exit 1; }
           ASSET_DIR=release-assets OUTPUT=release-sbom.spdx.json RELEASE_ID="athena-${TAG}" ./scripts/generate-release-sbom.sh
-          SBOM_FILE=release-sbom.spdx.json ./scripts/generate-release-manifest.sh
+          SBOM_FILE=release-sbom.spdx.json COMPATIBILITY_FILE=compatibility-v1.0.json ./scripts/generate-release-manifest.sh
           go run ./cmd/release-manifest-sign --input release-manifest.json --output release-manifest.json --public-key-output release-public-key.txt
           jq empty release-manifest.json
           ATHENA_RELEASE_PUBLIC_KEY="$(cat release-public-key.txt)" go run ./cmd/athena-launcher validate --manifest release-manifest.json
-          sha256sum release-assets/postgres_* release-manifest.json release-sbom.spdx.json > SHA256SUMS
+          sha256sum release-assets/postgres_* release-manifest.json release-sbom.spdx.json compatibility-v1.0.json > SHA256SUMS
       - name: Publish manifest and PostgreSQL assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$LAUNCHER_TAG"
-          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json release-sbom.spdx.json release-public-key.txt SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json release-sbom.spdx.json compatibility-v1.0.json release-public-key.txt SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
       - uses: actions/upload-artifact@v7
         with:
           name: release-manifest
           path: |
             release-manifest.json
             release-sbom.spdx.json
+            compatibility-v1.0.json
             release-public-key.txt
             SHA256SUMS
       - name: Rebuild launchers with embedded manifest URL

@@ -63,7 +63,7 @@ func testDeviceAction(capability string) deviceAction {
 	now := time.Now().UTC()
 	return deviceAction{
 		Protocol: deviceProtocol, Type: "ACTION", TaskID: "task", StepID: "step-1", ActionID: "action-1",
-		TraceID:  "trace-device-1",
+		TraceID: "trace-device-1", AgentBuildID: "build-1", RunManifestID: "manifest-1",
 		Sequence: 1, Revision: 1, IdempotencyKey: "task:step-1:action-1", IssuedAt: now,
 		Deadline: now.Add(time.Second), Capability: capability,
 		Policy: devicePolicy{Risk: deviceRiskReadOnly, Decision: "ALLOW"},
@@ -81,6 +81,9 @@ func TestDeviceRuntimeRejectsExpiredAction(t *testing.T) {
 	}
 	if observation.TraceID != action.TraceID {
 		t.Fatalf("observation trace_id = %q, want %q", observation.TraceID, action.TraceID)
+	}
+	if observation.AgentBuildID != action.AgentBuildID || observation.RunManifestID != action.RunManifestID {
+		t.Fatalf("observation deployment provenance = %+v", observation)
 	}
 }
 

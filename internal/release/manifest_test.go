@@ -63,6 +63,28 @@ func TestManifestUpgradeFloor(t *testing.T) {
 	}
 }
 
+func TestGAManifestPinsCompatibilityAndComponentVersions(t *testing.T) {
+	manifest := testManifest(time.Now().UTC())
+	manifest.Version = "1.0.0"
+	manifest.ReleaseID = "athena-v1.0.0"
+	manifest.ProtocolVersion = ProtocolVersion
+	manifest.MinimumFromVersion = "0.9.0"
+	manifest.CompatibilityURL = "https://releases.example/compatibility-v1.0.json"
+	manifest.CompatibilitySHA256 = strings.Repeat("b", 64)
+	manifest.Services = append(manifest.Services,
+		ServiceSpec{Name: "agent-runtime-client", Version: "1.0.0", Order: 20, HealthURL: "http://127.0.0.1:8090/healthz", Artifacts: manifest.Services[0].Artifacts},
+	)
+	manifest.Services[0].Version = "1.0.0"
+	manifest.Frontend = &FrontendSpec{Version: "1.0.0", Artifacts: manifest.Services[0].Artifacts}
+	if err := manifest.ValidateGA(); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Services[0].Version = ""
+	if err := manifest.ValidateGA(); err == nil {
+		t.Fatal("GA manifest accepted an unpinned service version")
+	}
+}
+
 func testManifest(now time.Time) *Manifest {
 	hash := strings.Repeat("a", 64)
 	artifact := Artifact{URL: "https://releases.example/runtime.tar.gz", SHA256: hash, SBOMSHA256: hash, CodeSigning: "NOTARIZED", Format: "tar.gz", Executable: "agent-runtime"}

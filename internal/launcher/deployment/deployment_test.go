@@ -104,9 +104,14 @@ func TestPrepareRemoteInstallsOnlyFrontend(t *testing.T) {
 		Database: DatabaseSpec{Version: "16.0", Artifacts: map[string]Artifact{
 			platformKey(): {URL: "https://downloads.example/postgres.tar.gz", SHA256: strings.Repeat("b", 64), Format: "tar.gz"},
 		}},
-		Services: []ServiceSpec{{Name: "agent-runtime", Order: 1, Artifacts: map[string]Artifact{
-			platformKey(): {URL: "https://downloads.example/runtime.tar.gz", SHA256: strings.Repeat("c", 64), Format: "tar.gz", Executable: "agent-runtime"},
-		}}},
+		Services: []ServiceSpec{
+			{Name: "agent-runtime", Order: 1, Artifacts: map[string]Artifact{
+				platformKey(): {URL: "https://downloads.example/runtime.tar.gz", SHA256: strings.Repeat("c", 64), Format: "tar.gz", Executable: "agent-runtime"},
+			}},
+			{Name: "agent-runtime-client", Order: 2, Artifacts: map[string]Artifact{
+				platformKey(): {URL: "https://downloads.example/client.tar.gz", SHA256: strings.Repeat("e", 64), Format: "tar.gz", Executable: "agent-runtime-client"},
+			}},
+		},
 		Frontend: &FrontendSpec{Root: "dist", Artifacts: map[string]Artifact{
 			platformKey(): {URL: "https://downloads.example/ui.tar.gz", SHA256: checksum, Format: "tar.gz"},
 		}},

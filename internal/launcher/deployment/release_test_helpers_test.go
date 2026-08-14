@@ -19,6 +19,10 @@ func completeDevelopmentManifest(manifest *Manifest) *Manifest {
 	manifest.Development = true
 	manifest.SBOMURL = "https://releases.example/release-sbom.spdx.json"
 	manifest.SBOMSHA256 = strings.Repeat("d", 64)
+	if compareReleaseSemver(manifest.Version, "1.0.0") >= 0 {
+		manifest.CompatibilityURL = "https://releases.example/compatibility-v1.0.json"
+		manifest.CompatibilitySHA256 = strings.Repeat("c", 64)
+	}
 	manifest.IssuedAt = now.Add(-time.Minute)
 	manifest.ExpiresAt = now.Add(24 * time.Hour)
 	complete := func(artifact Artifact) Artifact {
@@ -39,11 +43,17 @@ func completeDevelopmentManifest(manifest *Manifest) *Manifest {
 		}
 	}
 	for index := range manifest.Services {
+		if manifest.Services[index].Version == "" && compareReleaseSemver(manifest.Version, "1.0.0") >= 0 {
+			manifest.Services[index].Version = manifest.Version
+		}
 		for platform, artifact := range manifest.Services[index].Artifacts {
 			manifest.Services[index].Artifacts[platform] = complete(artifact)
 		}
 	}
 	if manifest.Frontend != nil {
+		if manifest.Frontend.Version == "" && compareReleaseSemver(manifest.Version, "1.0.0") >= 0 {
+			manifest.Frontend.Version = manifest.Version
+		}
 		for platform, artifact := range manifest.Frontend.Artifacts {
 			manifest.Frontend.Artifacts[platform] = complete(artifact)
 		}

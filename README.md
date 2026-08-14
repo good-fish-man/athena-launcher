@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+GA operations: [Athena 1.0 install, upgrade, and recovery](docs/ga-install-upgrade-v1.0.md) | [简体中文](docs/ga-install-upgrade-v1.0.zh-CN.md)
+
 Device runtime design: [Agent Desktop Runtime](docs/agent-desktop-runtime.md)
 
 Browser: [Command Guide](docs/browser-command-guide.md) | [Athena Browser System v3](docs/browser-system-v3.md)

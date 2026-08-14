@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+GA 运维：[Athena 1.0 安装、升级与恢复](docs/ga-install-upgrade-v1.0.zh-CN.md) | [English](docs/ga-install-upgrade-v1.0.md)
+
 设备运行时设计：[Agent Desktop Runtime](docs/agent-desktop-runtime.md)
 
 浏览器：[常见命令手册](docs/browser-command-guide.md#简体中文) | [Athena Browser System v3](docs/browser-system-v3.md#简体中文)

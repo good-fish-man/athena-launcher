@@ -2,6 +2,7 @@ package deployment
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -62,6 +63,17 @@ func Run(args []string) error {
 	case "status":
 		printStatus(opts.home)
 		return nil
+	case "readiness":
+		report := launcherReadiness(opts.home)
+		payload, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode launcher readiness: %w", err)
+		}
+		fmt.Println(string(payload))
+		if report.Status == "FAIL" || report.Status == "BLOCKED" {
+			return fmt.Errorf("launcher is not GA-ready: %s", report.Status)
+		}
+		return nil
 	case "version":
 		fmt.Printf("athena-launcher %s (%s)\n", LauncherVersion, platformKey())
 		return nil
@@ -85,6 +97,7 @@ Usage:
   athena-launcher validate [--manifest URL_OR_FILE]
   athena-launcher stop    [--home PATH]
   athena-launcher status  [--home PATH]
+  athena-launcher readiness [--home PATH]
   athena-launcher version
 
 Environment:
