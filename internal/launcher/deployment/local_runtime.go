@@ -130,7 +130,7 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 			return err
 		}
 		tracker.complete("frontend", "Athena interface is loaded in the desktop window")
-		tracker.clearUpdate("All installed packages are current")
+		clearUpdateWhenCurrent(tracker)
 		tracker.ready("/")
 		fmt.Println("Athena desktop is ready")
 		return runSupervisor(ctx, opts, supervisor, control)
@@ -148,7 +148,7 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 	} else {
 		tracker.complete("frontend", "API-only mode is ready")
 	}
-	tracker.clearUpdate("All installed packages are current")
+	clearUpdateWhenCurrent(tracker)
 	tracker.ready(frontendURL)
 	if frontend != nil {
 		defer func() {
@@ -163,6 +163,12 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 		fmt.Printf("Athena API is ready: http://127.0.0.1:%d\n", defaultClientHTTPPort)
 	}
 	return runSupervisor(ctx, opts, supervisor, control)
+}
+
+func clearUpdateWhenCurrent(tracker *startupTracker) {
+	if tracker != nil && tracker.current().Update.State != "available" {
+		tracker.clearUpdate("All installed packages are current")
+	}
 }
 
 func runSupervisor(ctx context.Context, opts options, supervisor *supervisor, control *startupController) error {

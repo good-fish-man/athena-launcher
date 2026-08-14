@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func prepare(ctx context.Context, opts options) (*Manifest, *launcherState, map[string]string, error) {
@@ -34,29 +35,32 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 		tracker.fail("manifest", err)
 		return nil, nil, nil, err
 	}
+	if updateApproved && strings.TrimSpace(state.Version) != "" && !manifest.AllowsUpgradeFrom(state.Version) {
+		err := fmt.Errorf("release %s requires version %s or newer; installed version is %s", manifest.Version, manifest.MinimumFromVersion, state.Version)
+		tracker.fail("manifest", err)
+		return nil, nil, nil, err
+	}
 	tracker.complete("manifest", fmt.Sprintf("Release %s verified for %s", manifest.Version, platformKey()))
 	if updates := packageUpdatesForOptions(opts, manifest); len(updates) > 0 && control != nil && !updateApproved {
 		installedManifest, installedErr := loadInstalledManifest(opts.home)
 		canDefer := installedErr == nil && installedPackagesUsable(opts.home, installedManifest)
 		tracker.offerUpdate(updates, canDefer)
-		var dismissUpdate <-chan struct{}
 		if canDefer {
-			dismissUpdate = control.dismissUpdate
-		}
-		select {
-		case <-ctx.Done():
-			return nil, nil, nil, ctx.Err()
-		case <-control.applyUpdate:
-			tracker.applyingUpdate()
-		case <-dismissUpdate:
 			manifest = installedManifest
-			tracker.clearUpdate("Update postponed; using installed packages")
 			tracker.complete("manifest", fmt.Sprintf("Using installed release %s", manifest.Version))
+		} else {
+			select {
+			case <-ctx.Done():
+				return nil, nil, nil, ctx.Err()
+			case <-control.applyUpdate:
+				tracker.applyingUpdate()
+			}
 		}
 	}
 
 	tracker.begin("database-package", "Checking the managed PostgreSQL package")
-	if _, err := installDatabase(ctx, opts.home, manifest); err != nil {
+	databaseDir, err := installDatabase(ctx, opts.home, manifest)
+	if err != nil {
 		tracker.fail("database-package", err)
 		return nil, nil, nil, err
 	}
@@ -84,6 +88,9 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 	if browserExecutable != "" {
 		executables["agent-browser"] = browserExecutable
 	}
+	database := newManagedDatabase(opts.home, databaseDir, manifest.Database.BinDir, state.DBPassword)
+	executables["pg_dump"] = database.binary("pg_dump")
+	executables["pg_restore"] = database.binary("pg_restore")
 
 	tracker.begin("frontend-package", "Checking the Athena interface package")
 	if opts.frontendDir != "" {

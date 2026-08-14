@@ -19,11 +19,37 @@ func TestSupervisorReturnsUpdateRequestAfterApproval(t *testing.T) {
 	tracker.offerUpdate([]packageUpdate{{Component: "agent-runtime", DisplayName: "Agent Runtime", CurrentHash: "old", RemoteHash: "new"}}, true)
 	control := newStartupController()
 	control.applyUpdate <- struct{}{}
-	supervisor := &supervisor{tracker: tracker, exits: make(chan processExit, 1)}
+	backupCalls := 0
+	supervisor := &supervisor{tracker: tracker, exits: make(chan processExit, 1), preUpdateBackup: func(context.Context) error {
+		backupCalls++
+		return nil
+	}}
 
 	err := supervisor.Run(context.Background(), control, func() ([]packageUpdate, error) { return nil, nil })
 	if !errors.Is(err, errUpdateRequested) {
 		t.Fatalf("supervisor.Run() error = %v, want errUpdateRequested", err)
+	}
+	if backupCalls != 1 {
+		t.Fatalf("pre-update backup calls = %d, want 1", backupCalls)
+	}
+}
+
+func TestSupervisorKeepsRunningWhenPreUpdateBackupFails(t *testing.T) {
+	tracker := newStartupTracker(t.TempDir())
+	tracker.offerUpdate([]packageUpdate{{Component: "agent-runtime"}}, true)
+	control := newStartupController()
+	control.applyUpdate <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	supervisor := &supervisor{tracker: tracker, exits: make(chan processExit, 1), preUpdateBackup: func(context.Context) error {
+		cancel()
+		return errors.New("backup unavailable")
+	}}
+	if err := supervisor.Run(ctx, control, func() ([]packageUpdate, error) { return nil, nil }); err != nil {
+		t.Fatalf("supervisor.Run() error = %v", err)
+	}
+	update := tracker.current().Update
+	if update.State != "available" || !strings.Contains(update.Message, "backup unavailable") {
+		t.Fatalf("unexpected update state after backup failure: %+v", update)
 	}
 }
 
@@ -112,13 +138,14 @@ func TestSaveInstalledManifest(t *testing.T) {
 	}
 }
 
-func TestPrepareUsesInstalledManifestWhenUpdateIsDismissed(t *testing.T) {
+func TestPrepareUsesInstalledManifestWhileUpdateIsAvailable(t *testing.T) {
 	home := t.TempDir()
 	remote := updateTestManifest()
 	installed := updateTestManifest()
 	installed.Version = "0.1.0"
 	installed.Database.Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/old-db.tar.gz", SHA256: testHash("old-db")}
 	installed.Services[0].Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/old-runtime.tar.gz", SHA256: testHash("old-runtime"), Executable: "agent-runtime"}
+	completeDevelopmentManifest(installed)
 	if err := saveInstalledManifest(home, installed); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +157,16 @@ func TestPrepareUsesInstalledManifestWhenUpdateIsDismissed(t *testing.T) {
 	writeTestExecutable(t, filepath.Join(home, "services", "agent-runtime-client", "0.1.0", "agent-runtime-client"))
 	writeTestDatabaseBinaries(t, filepath.Join(home, "postgres", "16.13.0"))
 	writeTestExecutable(t, filepath.Join(home, "frontend", "0.1.0", "index.html"))
+	if err := validateInstalledPackages(home, installed); err != nil {
+		t.Fatalf("installed release fixture is not usable: %v", err)
+	}
+	loadedInstalled, err := loadInstalledManifest(home)
+	if err != nil {
+		t.Fatalf("installed release fixture cannot be loaded: %v", err)
+	}
+	if err := validateInstalledPackages(home, loadedInstalled); err != nil {
+		t.Fatalf("loaded installed release fixture is not usable: %v", err)
+	}
 
 	manifestPath := filepath.Join(home, "remote-manifest.json")
 	data, err := json.Marshal(remote)
@@ -140,13 +177,16 @@ func TestPrepareUsesInstalledManifestWhenUpdateIsDismissed(t *testing.T) {
 		t.Fatal(err)
 	}
 	control := newStartupController()
-	control.dismissUpdate <- struct{}{}
-	selected, _, _, err := prepareWithTracker(context.Background(), options{home: home, manifestSource: manifestPath}, newStartupTracker(home), control, false)
+	tracker := newStartupTracker(home)
+	selected, _, _, err := prepareWithTracker(context.Background(), options{home: home, manifestSource: manifestPath}, tracker, control, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selected.Version != installed.Version {
 		t.Fatalf("selected manifest version = %q, want installed %q", selected.Version, installed.Version)
+	}
+	if tracker.current().Update.State != "available" {
+		t.Fatalf("update prompt was not preserved: %+v", tracker.current().Update)
 	}
 }
 
@@ -163,7 +203,7 @@ func TestInstalledPackagesUsableRejectsMissingService(t *testing.T) {
 
 func updateTestManifest() *Manifest {
 	platform := platformKey()
-	return &Manifest{
+	return completeDevelopmentManifest(&Manifest{
 		Version: "0.2.0",
 		Database: DatabaseSpec{Version: "16.13.0", Artifacts: map[string]Artifact{
 			platform: {URL: "https://downloads.example/db.tar.gz", SHA256: testHash("new-db")},
@@ -173,7 +213,7 @@ func updateTestManifest() *Manifest {
 			{Name: "agent-runtime-client", Artifacts: map[string]Artifact{platform: {URL: "https://downloads.example/client.tar.gz", SHA256: testHash("client"), Executable: "agent-runtime-client"}}},
 		},
 		Frontend: &FrontendSpec{Artifacts: map[string]Artifact{platform: {URL: "https://downloads.example/ui.tar.gz", SHA256: testHash("ui")}}},
-	}
+	})
 }
 
 func writeArtifactMarker(t *testing.T, root, hash string) {
@@ -202,7 +242,7 @@ func writeTestDatabaseBinaries(t *testing.T, root string) {
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
 	}
-	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
+	for _, name := range []string{"initdb", "pg_ctl", "postgres", "pg_dump", "pg_restore"} {
 		writeTestExecutable(t, filepath.Join(root, "bin", name+suffix))
 	}
 }

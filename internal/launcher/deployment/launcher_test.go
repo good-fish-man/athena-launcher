@@ -31,7 +31,7 @@ func TestDefaultManifestUsesLatestPublicRelease(t *testing.T) {
 
 func TestManifestValidation(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
-	manifest := &Manifest{
+	manifest := completeDevelopmentManifest(&Manifest{
 		Version: "1.0.0",
 		Database: DatabaseSpec{
 			Version:   "16.3",
@@ -42,22 +42,23 @@ func TestManifestValidation(t *testing.T) {
 			Name: "agent-runtime", Order: 1,
 			Artifacts: map[string]Artifact{platformKey(): {URL: "https://downloads.example/runtime.tar.gz", SHA256: checksum, Format: "tar.gz", Executable: "agent-runtime"}},
 		}},
-	}
+	})
 	if err := manifest.Validate(platformKey()); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
 	}
 	manifest.Browser = &BrowserSpec{Version: "0.33.1", Artifacts: map[string]Artifact{
 		platformKey(): {URL: "https://downloads.example/agent-browser", SHA256: checksum, Format: "raw", Executable: "agent-browser"},
 	}}
+	completeDevelopmentManifest(manifest)
 	if err := manifest.Validate(platformKey()); err != nil {
 		t.Fatalf("manifest with browser artifact rejected: %v", err)
 	}
-	manifest.Database.Artifacts["test-missing-url"] = Artifact{SHA256: checksum, Format: "tar.gz"}
+	manifest.Database.Artifacts["test-missing-url"] = Artifact{SHA256: checksum, SBOMSHA256: checksum, CodeSigning: "DEVELOPMENT", Format: "tar.gz"}
 	if err := manifest.Validate(platformKey()); err == nil {
 		t.Fatal("artifact without a URL was accepted")
 	}
 	delete(manifest.Database.Artifacts, "test-missing-url")
-	manifest.Services[0].Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/runtime", SHA256: "bad", Executable: "../runtime"}
+	manifest.Services[0].Artifacts[platformKey()] = Artifact{URL: "https://downloads.example/runtime", SHA256: "bad", SBOMSHA256: checksum, CodeSigning: "DEVELOPMENT", Executable: "../runtime"}
 	if err := manifest.Validate(platformKey()); err == nil {
 		t.Fatal("unsafe manifest was accepted")
 	}
@@ -239,8 +240,8 @@ func TestInstallBrowserUsesVerifiedRawArtifact(t *testing.T) {
 
 func TestGeneratedConfigsUseManagedDatabase(t *testing.T) {
 	home := t.TempDir()
-	state := &launcherState{DBPassword: "test-secret"}
-	executables := map[string]string{"agent-runtime": filepath.Join(home, "services", "agent-runtime", "1", "agent-runtime")}
+	state := &launcherState{DBPassword: "test-secret", BackupEncryptionKey: strings.Repeat("ab", 32)}
+	executables := map[string]string{"agent-runtime": filepath.Join(home, "services", "agent-runtime", "1", "agent-runtime"), "pg_dump": filepath.Join(home, "postgres", "bin", "pg_dump"), "pg_restore": filepath.Join(home, "postgres", "bin", "pg_restore")}
 	paths, err := writeGeneratedConfigs(home, state, executables)
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +255,17 @@ func TestGeneratedConfigsUseManagedDatabase(t *testing.T) {
 		if !strings.Contains(text, "test-secret") || !strings.Contains(text, "db_port: 15432") {
 			t.Fatalf("managed database settings missing from %s", path)
 		}
+	}
+	clientConfig, err := os.ReadFile(paths.clientConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(clientConfig), "encryption_key_file:") || strings.Contains(string(clientConfig), state.BackupEncryptionKey) {
+		t.Fatal("client config must reference the recovery key without embedding it")
+	}
+	keyData, err := os.ReadFile(filepath.Join(home, "secrets", "backup.key"))
+	if err != nil || strings.TrimSpace(string(keyData)) != state.BackupEncryptionKey {
+		t.Fatalf("backup key was not provisioned safely: %v", err)
 	}
 	skills, err := os.ReadFile(paths.skillsConfig)
 	if err != nil {
@@ -274,7 +286,7 @@ func TestManagedDatabaseRequiresOnlyEmbeddedServerBinaries(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
 	}
-	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
+	for _, name := range []string{"initdb", "pg_ctl", "postgres", "pg_dump", "pg_restore"} {
 		if err := os.WriteFile(filepath.Join(binDir, name+suffix), nil, 0o700); err != nil {
 			t.Fatal(err)
 		}

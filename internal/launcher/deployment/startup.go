@@ -176,6 +176,32 @@ func (t *startupTracker) applyingUpdate() {
 	t.persist()
 }
 
+func (t *startupTracker) protectingUpdate() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update.State = "applying"
+	t.snapshot.Update.Message = "Creating and verifying an encrypted recovery point before stopping services"
+	t.snapshot.Update.CanDefer = false
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
+func (t *startupTracker) updateProtectionError(err error) {
+	if t == nil || err == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshot.Update.State = "available"
+	t.snapshot.Update.Message = "Update was not started because the recovery point failed: " + err.Error()
+	t.snapshot.Update.CanDefer = true
+	t.touchLocked()
+	t.mu.Unlock()
+	t.persist()
+}
+
 func (t *startupTracker) clearUpdate(message string) {
 	if t == nil {
 		return

@@ -22,6 +22,10 @@ func writeGeneratedConfigs(home string, state *launcherState, executables map[st
 	if err != nil {
 		return nil, err
 	}
+	backupKeyFile, err := ensureBackupKey(home, state)
+	if err != nil {
+		return nil, err
+	}
 	for _, directory := range []string{configDir, uploadsDir, userSkillsDir, filepath.Join(home, "logs")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, err
@@ -59,6 +63,13 @@ plugins:
   trust_store_path: %s
   audit_path: %s
 
+operations:
+  backup_dir: %s
+  encryption_key_file: %s
+  pg_dump_path: %s
+  pg_restore_path: %s
+  max_backups: 10
+
 log:
   level: "info"
 
@@ -82,6 +93,7 @@ paths:
   uploads_dir: %s
 `, defaultClientHTTPPort, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort, yamlString(state.InternalServiceToken),
 		yamlString(pluginPaths.packages), yamlString(pluginPaths.registry), yamlString(pluginPaths.trustStore), yamlString(pluginPaths.audit),
+		yamlString(filepath.Join(home, "backups")), yamlString(backupKeyFile), yamlString(executables["pg_dump"]), yamlString(executables["pg_restore"]),
 		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), defaultDatabasePort, yamlString(defaultDatabaseName),
 		yamlString(paths.clientConfig), yamlString(paths.skillsConfig), yamlString(uploadsDir))
 	runtimeYAML := fmt.Sprintf(`server:
@@ -148,6 +160,21 @@ plugins:
 		}
 	}
 	return paths, nil
+}
+
+func ensureBackupKey(home string, state *launcherState) (string, error) {
+	if state == nil || len(state.BackupEncryptionKey) != 64 {
+		return "", fmt.Errorf("backup encryption identity is unavailable; restore state.json or rebind this installation")
+	}
+	directory := filepath.Join(home, "secrets")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(directory, "backup.key")
+	if err := writeAtomic(path, []byte(state.BackupEncryptionKey+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("write backup encryption key: %w", err)
+	}
+	return path, nil
 }
 
 func yamlString(value string) string { return strconv.Quote(value) }

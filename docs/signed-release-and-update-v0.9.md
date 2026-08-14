@@ -1,0 +1,26 @@
+# Signed Release and Safe Update v0.9
+
+Athena v0.9 uses a fail-closed release chain:
+
+1. Build immutable platform artifacts.
+2. Generate an SPDX JSON SBOM and SHA-256.
+3. Generate `athena.release-manifest.v1` with component hashes, artifact signatures, code-signing expectations, protocol version, expiry, and minimum upgrade version.
+4. Sign the canonical manifest with Ed25519.
+5. Embed the corresponding public key in Launcher builds.
+6. Launcher verifies manifest signature/expiry, SBOM hash, artifact hash/signature, platform code signature, and upgrade floor before install.
+7. A local update creates an encrypted PostgreSQL backup before stopping the old services.
+
+Remote manifests cannot enable development mode. Production manifests without a configured public key are rejected. An already installed and previously verified release may continue to run after manifest expiry, but a new download cannot use an expired manifest.
+
+macOS requires a valid Developer ID signature and notarization evidence. Windows requires Authenticode. Linux packages should carry the distribution/package signature. The workflow's signing gate blocks normal publication unless platform signing evidence is configured; the explicit emergency override must be treated as an auditable exception, not a successful signed release.
+
+Generate and validate locally:
+
+```bash
+TAG=v0.9.0 ./scripts/generate-release-sbom.sh dist/release-sbom.spdx.json
+TAG=v0.9.0 ./scripts/generate-release-manifest.sh dist dist/release-manifest.json
+ATHENA_RELEASE_PRIVATE_KEY="$(cat /secure/ed25519.key)" go run ./cmd/release-manifest-sign -input dist/release-manifest.json -output dist/release-manifest.json
+go run ./cmd/athena-launcher validate --manifest dist/release-manifest.json
+```
+
+Never commit private signing keys. Keep release keys outside the build workspace, rotate with an explicit trust-store release, and retain signed manifests/SBOMs for audit.

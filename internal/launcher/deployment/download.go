@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	releasepkg "athena-launcher/internal/release"
 )
 
 var downloadClient = &http.Client{Timeout: 30 * time.Minute}
@@ -35,7 +38,53 @@ func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 	if err := manifest.Validate(platformKey()); err != nil {
 		return nil, err
 	}
+	remote := remoteManifestSource(source)
+	if remote && manifest.Development {
+		return nil, fmt.Errorf("remote release manifest cannot use development mode")
+	}
+	if !manifest.Development {
+		publicKey, err := configuredReleasePublicKey()
+		if err != nil {
+			return nil, err
+		}
+		if err := manifest.Verify(publicKey, time.Now().UTC()); err != nil {
+			return nil, fmt.Errorf("verify release manifest: %w", err)
+		}
+		if remote {
+			if err := verifyReleaseSBOM(ctx, &manifest); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return &manifest, nil
+}
+
+func configuredReleasePublicKey() (ed25519.PublicKey, error) {
+	value := strings.TrimSpace(DefaultReleasePublicKey)
+	if value == "" {
+		value = strings.TrimSpace(os.Getenv("ATHENA_RELEASE_PUBLIC_KEY"))
+	}
+	if value == "" {
+		return nil, fmt.Errorf("release public key is not configured")
+	}
+	return releasepkg.DecodePublicKey(value)
+}
+
+func verifyReleaseSBOM(ctx context.Context, manifest *Manifest) error {
+	data, err := readSource(ctx, manifest.SBOMURL, 16<<20)
+	if err != nil {
+		return fmt.Errorf("download release SBOM: %w", err)
+	}
+	digest := sha256.Sum256(data)
+	if !strings.EqualFold(hex.EncodeToString(digest[:]), manifest.SBOMSHA256) {
+		return fmt.Errorf("release SBOM SHA-256 mismatch")
+	}
+	return nil
+}
+
+func remoteManifestSource(source string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(source))
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 func readSource(ctx context.Context, source string, limit int64) ([]byte, error) {
@@ -74,6 +123,9 @@ func installServices(ctx context.Context, home string, manifest *Manifest, state
 		marker := filepath.Join(target, ".artifact-sha256")
 		if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
 			if _, err := os.Stat(executable); err == nil {
+				if err := verifyInstalledCodeSignature(executable, artifact.CodeSigning); err != nil {
+					return nil, err
+				}
 				installed[service.Name] = executable
 				continue
 			}
@@ -81,6 +133,9 @@ func installServices(ctx context.Context, home string, manifest *Manifest, state
 		if existing := findArtifactRootByMarker(serviceRoot, artifact.SHA256); existing != "" {
 			existingExecutable, err := findInstalledExecutable(existing, filepath.Base(filepath.FromSlash(artifact.Executable)))
 			if err == nil {
+				if err := verifyInstalledCodeSignature(existingExecutable, artifact.CodeSigning); err != nil {
+					return nil, err
+				}
 				installed[service.Name] = existingExecutable
 				state.Installed[service.Name] = filepath.Base(existing)
 				fmt.Printf("[%s] reusing verified package %s\n", service.Name, shortHash(artifact.SHA256))
@@ -97,6 +152,9 @@ func installServices(ctx context.Context, home string, manifest *Manifest, state
 		if err := os.Chmod(executable, 0o755); err != nil {
 			return nil, fmt.Errorf("make %s executable: %w", executable, err)
 		}
+		if err := verifyInstalledCodeSignature(executable, artifact.CodeSigning); err != nil {
+			return nil, err
+		}
 		installed[service.Name] = executable
 		state.Installed[service.Name] = manifest.Version
 	}
@@ -111,9 +169,15 @@ func installDatabase(ctx context.Context, home string, manifest *Manifest) (stri
 	marker := filepath.Join(target, ".artifact-sha256")
 	expectedMarker := databaseArtifactMarker(artifact.SHA256)
 	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), expectedMarker) {
+		if err := verifyInstalledCodeSignature(newManagedDatabase(home, target, manifest.Database.BinDir, "").binary("postgres"), artifact.CodeSigning); err != nil {
+			return "", err
+		}
 		return target, nil
 	}
 	if existing := findArtifactRootByMarker(databaseRoot, expectedMarker); existing != "" {
+		if err := verifyInstalledCodeSignature(newManagedDatabase(home, existing, manifest.Database.BinDir, "").binary("postgres"), artifact.CodeSigning); err != nil {
+			return "", err
+		}
 		fmt.Printf("[postgres] reusing verified package %s\n", shortHash(artifact.SHA256))
 		return existing, nil
 	}
@@ -122,6 +186,9 @@ func installDatabase(ctx context.Context, home string, manifest *Manifest) (stri
 		return "", fmt.Errorf("install postgres: %w", err)
 	}
 	if err := os.WriteFile(marker, []byte(expectedMarker+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	if err := verifyInstalledCodeSignature(newManagedDatabase(home, target, manifest.Database.BinDir, "").binary("postgres"), artifact.CodeSigning); err != nil {
 		return "", err
 	}
 	return target, nil
@@ -141,12 +208,18 @@ func installBrowser(ctx context.Context, home string, manifest *Manifest, state 
 	marker := filepath.Join(target, ".artifact-sha256")
 	if current, err := os.ReadFile(marker); err == nil && strings.EqualFold(strings.TrimSpace(string(current)), artifact.SHA256) {
 		if _, err := os.Stat(executable); err == nil {
+			if err := verifyInstalledCodeSignature(executable, artifact.CodeSigning); err != nil {
+				return "", err
+			}
 			return executable, nil
 		}
 	}
 	if existing := findArtifactRootByMarker(browserRoot, artifact.SHA256); existing != "" {
 		existingExecutable, err := findInstalledExecutable(existing, filepath.Base(filepath.FromSlash(artifact.Executable)))
 		if err == nil {
+			if err := verifyInstalledCodeSignature(existingExecutable, artifact.CodeSigning); err != nil {
+				return "", err
+			}
 			if state != nil {
 				state.Installed["agent-browser"] = filepath.Base(existing)
 			}
@@ -163,6 +236,9 @@ func installBrowser(ctx context.Context, home string, manifest *Manifest, state 
 	}
 	if err := os.Chmod(executable, 0o755); err != nil {
 		return "", fmt.Errorf("make %s executable: %w", executable, err)
+	}
+	if err := verifyInstalledCodeSignature(executable, artifact.CodeSigning); err != nil {
+		return "", err
 	}
 	if state != nil {
 		state.Installed["agent-browser"] = manifest.Browser.Version

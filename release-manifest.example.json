@@ -1,35 +1,59 @@
 {
-  "version": "0.2.0",
+  "schema": "athena.release-manifest.v1",
+  "release_id": "athena-v0.9.0",
+  "version": "0.9.0",
+  "protocol_version": "athena.operations.v1",
+  "minimum_from_version": "0.8.0",
+  "sbom_url": "https://github.com/example/athena/releases/download/v0.9.0/release-sbom.spdx.json",
+  "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "signature": {
+    "algorithm": "Ed25519",
+    "key_id": "RELEASE_KEY_ID",
+    "value": "BASE64_ED25519_SIGNATURE"
+  },
+  "issued_at": "2026-08-15T00:00:00Z",
+  "expires_at": "2026-11-13T00:00:00Z",
   "database": {
     "version": "16.13.0",
     "bin_dir": "bin",
     "artifacts": {
-      "darwin-arm64": { "url": "https://releases.example.com/athena/postgres-16.13.0-darwin-arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "darwin-amd64": { "url": "https://releases.example.com/athena/postgres-16.13.0-darwin-amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "linux-amd64": { "url": "https://releases.example.com/athena/postgres-16.13.0-linux-amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "linux-arm64": { "url": "https://releases.example.com/athena/postgres-16.13.0-linux-arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "windows-amd64": { "url": "https://releases.example.com/athena/postgres-16.13.0-windows-amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" }
+      "darwin-arm64": {
+        "url": "https://github.com/example/athena/releases/download/v0.9.0/postgres_16.13.0_darwin_arm64.tar.gz",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "Ed25519", "key_id": "RELEASE_KEY_ID", "value": "BASE64_ED25519_SIGNATURE" },
+        "code_signing": "NOTARIZED",
+        "format": "tar.gz",
+        "executable": ""
+      }
     }
   },
   "browser": {
     "version": "0.33.1",
     "artifacts": {
-      "darwin-arm64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-darwin-arm64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
-      "darwin-amd64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-darwin-x64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
-      "linux-amd64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-linux-x64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
-      "linux-arm64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-linux-arm64", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser" },
-      "windows-amd64": { "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-win32-x64.exe", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "raw", "executable": "agent-browser.exe" }
+      "darwin-arm64": {
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-darwin-arm64",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "Ed25519", "key_id": "RELEASE_KEY_ID", "value": "BASE64_ED25519_SIGNATURE" },
+        "code_signing": "THIRD_PARTY_UPSTREAM",
+        "format": "raw",
+        "executable": "agent-browser"
+      }
     }
   },
   "frontend": {
-    "listen_addr": "127.0.0.1:3000",
     "root": "",
     "artifacts": {
-      "darwin-arm64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "darwin-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "linux-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "linux-arm64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "windows-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" }
+      "darwin-arm64": {
+        "url": "https://github.com/example/athena-ui/releases/download/v0.9.0/athena-agent-ui_v0.9.0.tar.gz",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": { "algorithm": "Ed25519", "key_id": "RELEASE_KEY_ID", "value": "BASE64_ED25519_SIGNATURE" },
+        "code_signing": "SIGNED_MANIFEST",
+        "format": "tar.gz",
+        "executable": ""
+      }
     }
   },
   "services": [
@@ -38,11 +62,15 @@
       "order": 10,
       "health_url": "http://127.0.0.1:18081/healthz",
       "artifacts": {
-        "darwin-arm64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_darwin_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "darwin-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_darwin_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "linux-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_linux_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "linux-arm64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_linux_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "windows-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_windows_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime.exe" }
+        "darwin-arm64": {
+          "url": "https://github.com/example/agent-runtime/releases/download/v0.9.0/agent-runtime_v0.9.0_darwin_arm64.tar.gz",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "signature": { "algorithm": "Ed25519", "key_id": "RELEASE_KEY_ID", "value": "BASE64_ED25519_SIGNATURE" },
+          "code_signing": "NOTARIZED",
+          "format": "tar.gz",
+          "executable": "agent-runtime_v0.9.0_darwin_arm64/agent-runtime"
+        }
       }
     },
     {
@@ -50,11 +78,15 @@
       "order": 20,
       "health_url": "http://127.0.0.1:8090/healthz",
       "artifacts": {
-        "darwin-arm64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_darwin_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "darwin-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_darwin_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "linux-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_linux_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "linux-arm64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_linux_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "windows-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_windows_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client.exe" }
+        "darwin-arm64": {
+          "url": "https://github.com/example/agent-runtime-client/releases/download/v0.9.0/agent-runtime-client_v0.9.0_darwin_arm64.tar.gz",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "signature": { "algorithm": "Ed25519", "key_id": "RELEASE_KEY_ID", "value": "BASE64_ED25519_SIGNATURE" },
+          "code_signing": "NOTARIZED",
+          "format": "tar.gz",
+          "executable": "agent-runtime-client_v0.9.0_darwin_arm64/agent-runtime-client"
+        }
       }
     }
   ]

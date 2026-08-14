@@ -23,8 +23,9 @@ const (
 
 // Release metadata can be injected at build time with -ldflags.
 var (
-	LauncherVersion    = "0.2.0"
-	DefaultManifestURL = publicManifestURL
+	LauncherVersion         = "0.9.0"
+	DefaultManifestURL      = publicManifestURL
+	DefaultReleasePublicKey = ""
 )
 
 func defaultHome() (string, error) {

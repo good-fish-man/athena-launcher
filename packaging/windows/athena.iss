@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.9.0"
 #endif
 #ifndef SourceExe
   #define SourceExe "athena-launcher.exe"

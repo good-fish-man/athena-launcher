@@ -99,7 +99,7 @@ func TestCheckRemoteClient(t *testing.T) {
 func TestPrepareRemoteInstallsOnlyFrontend(t *testing.T) {
 	home := t.TempDir()
 	checksum := strings.Repeat("a", 64)
-	manifest := &Manifest{
+	manifest := completeDevelopmentManifest(&Manifest{
 		Version: "1.0.0",
 		Database: DatabaseSpec{Version: "16.0", Artifacts: map[string]Artifact{
 			platformKey(): {URL: "https://downloads.example/postgres.tar.gz", SHA256: strings.Repeat("b", 64), Format: "tar.gz"},
@@ -110,7 +110,7 @@ func TestPrepareRemoteInstallsOnlyFrontend(t *testing.T) {
 		Frontend: &FrontendSpec{Root: "dist", Artifacts: map[string]Artifact{
 			platformKey(): {URL: "https://downloads.example/ui.tar.gz", SHA256: checksum, Format: "tar.gz"},
 		}},
-	}
+	})
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)

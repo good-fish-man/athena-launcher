@@ -46,7 +46,7 @@ func TestPluginRegistryProvisioningIsStable(t *testing.T) {
 
 func TestGeneratedConfigsSharePluginRegistry(t *testing.T) {
 	home := t.TempDir()
-	paths, err := writeGeneratedConfigs(home, &launcherState{DBPassword: "secret", InternalServiceToken: "token"}, map[string]string{})
+	paths, err := writeGeneratedConfigs(home, &launcherState{DBPassword: "secret", InternalServiceToken: "token", BackupEncryptionKey: strings.Repeat("ab", 32)}, map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}

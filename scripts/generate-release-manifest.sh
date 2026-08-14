@@ -1,20 +1,38 @@
 #!/usr/bin/env sh
 set -eu
 
-TAG=${TAG:-v0.2.0}
+TAG=${TAG:-v0.9.0}
 LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
 AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.33.1}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
+SBOM_FILE=${SBOM_FILE:-release-sbom.spdx.json}
+MINIMUM_FROM_VERSION=${MINIMUM_FROM_VERSION:-0.8.0}
+DARWIN_CODE_SIGNING_STATUS=${DARWIN_CODE_SIGNING_STATUS:-UNAVAILABLE}
+WINDOWS_CODE_SIGNING_STATUS=${WINDOWS_CODE_SIGNING_STATUS:-UNAVAILABLE}
+LINUX_CODE_SIGNING_STATUS=${LINUX_CODE_SIGNING_STATUS:-CHECKSUM_VERIFIED}
 RUNTIME_REPO=${RUNTIME_REPO:-good-fish-man/agent-runtime}
 CLIENT_REPO=${CLIENT_REPO:-good-fish-man/agent-runtime-client}
 FRONTEND_REPO=${FRONTEND_REPO:-good-fish-man/athena-agent-ui}
 LAUNCHER_REPO=${LAUNCHER_REPO:-good-fish-man/athena-launcher}
 AGENT_BROWSER_REPO=${AGENT_BROWSER_REPO:-vercel-labs/agent-browser}
 
+if date -u -d '+90 days' '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+  default_expires_at=$(date -u -d '+90 days' '+%Y-%m-%dT%H:%M:%SZ')
+else
+  default_expires_at=$(date -u -v+90d '+%Y-%m-%dT%H:%M:%SZ')
+fi
+ISSUED_AT=${ISSUED_AT:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}
+EXPIRES_AT=${EXPIRES_AT:-$default_expires_at}
+
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2
+  exit 1
+fi
+
+if [ ! -f "$SBOM_FILE" ]; then
+  echo "release SBOM is required: $SBOM_FILE" >&2
   exit 1
 fi
 
@@ -75,7 +93,18 @@ release_url() {
 }
 
 jq -n \
-  --arg version "${TAG#v}" \
+	--arg schema "athena.release-manifest.v1" \
+	--arg release_id "athena-$TAG" \
+	--arg version "${TAG#v}" \
+	--arg protocol_version "athena.operations.v1" \
+	--arg minimum_from_version "$MINIMUM_FROM_VERSION" \
+	--arg sbom_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "release-sbom.spdx.json")" \
+	--arg sbom_sha "$(sha256 "$SBOM_FILE")" \
+	--arg issued_at "$ISSUED_AT" \
+	--arg expires_at "$EXPIRES_AT" \
+	--arg darwin_signing "$DARWIN_CODE_SIGNING_STATUS" \
+	--arg windows_signing "$WINDOWS_CODE_SIGNING_STATUS" \
+	--arg linux_signing "$LINUX_CODE_SIGNING_STATUS" \
   --arg tag "$TAG" \
   --arg postgres_version "$POSTGRES_VERSION" \
   --arg browser_version "$AGENT_BROWSER_VERSION" \
@@ -100,8 +129,23 @@ jq -n \
   --arg b_la_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_linux_arm64")" --arg b_la_sha "$(sha256 "$ASSET_DIR/$browser_linux_arm64")" \
   --arg b_lx_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_linux_amd64")" --arg b_lx_sha "$(sha256 "$ASSET_DIR/$browser_linux_amd64")" \
   --arg b_wx_url "$(release_url "$AGENT_BROWSER_REPO" "v$AGENT_BROWSER_VERSION" "$browser_windows_amd64")" --arg b_wx_sha "$(sha256 "$ASSET_DIR/$browser_windows_amd64")" \
-  '{
-    version: $version,
+	'def enrich:
+	  with_entries(.key as $platform | .value += {
+	    sbom_sha256: $sbom_sha,
+	    code_signing: (if ($platform|startswith("darwin-")) then $darwin_signing elif ($platform|startswith("windows-")) then $windows_signing else $linux_signing end),
+	    signature: {algorithm:"Ed25519",key_id:"",value:""}
+	  });
+	{
+	  schema: $schema,
+	  release_id: $release_id,
+	  version: $version,
+	  protocol_version: $protocol_version,
+	  minimum_from_version: $minimum_from_version,
+	  sbom_url: $sbom_url,
+	  sbom_sha256: $sbom_sha,
+	  signature: {algorithm:"Ed25519",key_id:"",value:""},
+	  issued_at: $issued_at,
+	  expires_at: $expires_at,
     database: {
       version: $postgres_version,
       bin_dir: "bin",
@@ -160,6 +204,10 @@ jq -n \
         }
       }
     ]
-  }' > "$OUTPUT"
+	  }
+	| .database.artifacts |= enrich
+	| if .browser then .browser.artifacts |= enrich else . end
+	| .services |= map(.artifacts |= enrich)
+	| if .frontend then .frontend.artifacts |= enrich else . end' > "$OUTPUT"
 
 echo "generated $OUTPUT"

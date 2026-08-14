@@ -147,7 +147,7 @@ func (d *managedDatabase) runningFromData(ctx context.Context) bool {
 }
 
 func (d *managedDatabase) validateBinaries() error {
-	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
+	for _, name := range []string{"initdb", "pg_ctl", "postgres", "pg_dump", "pg_restore"} {
 		if _, err := os.Stat(d.binary(name)); err != nil {
 			return fmt.Errorf("postgres package is missing %s: %w", d.binary(name), err)
 		}
