@@ -10,11 +10,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	log "github.com/good-fish-man/logx"
 	"golang.org/x/net/websocket"
 )
 
@@ -25,10 +27,12 @@ type deviceRuntime struct {
 	urls     []string
 	token    string
 	bridge   *desktopBridge
+	journal  string
 
 	mu        sync.Mutex
 	completed map[string]deviceObservation
 	inflight  map[string]context.CancelFunc
+	durable   map[string]journalAction
 	sequences map[string]int64
 }
 
@@ -40,9 +44,24 @@ func newDeviceRuntime(state *launcherState, bridge *desktopBridge) (*deviceRunti
 	if err != nil {
 		return nil, err
 	}
+	journalPath := filepath.Join(bridge.home, "data", "device-action-journal-v4.json")
+	journal, err := loadDeviceActionJournal(journalPath)
+	if err != nil {
+		return nil, err
+	}
+	for key, observation := range journal.Completed {
+		if observation.DeviceID == "" {
+			observation.DeviceID = state.DeviceID
+			journal.Completed[key] = observation
+		}
+	}
+	if err := saveDeviceActionJournal(journalPath, journal); err != nil {
+		return nil, err
+	}
 	return &deviceRuntime{
 		deviceID: state.DeviceID, name: "Athena Desktop", url: endpoints[0], urls: endpoints,
-		token: deviceRuntimeToken(state), bridge: bridge, completed: make(map[string]deviceObservation), inflight: make(map[string]context.CancelFunc), sequences: make(map[string]int64),
+		token: deviceRuntimeToken(state), bridge: bridge, journal: journalPath,
+		completed: journal.Completed, inflight: make(map[string]context.CancelFunc), durable: journal.InFlight, sequences: journal.Sequences,
 	}, nil
 }
 
@@ -158,7 +177,8 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 	defer close(connectionClosed)
 	if err := websocket.JSON.Send(connection, map[string]any{
 		"protocol": deviceProtocol, "type": "HELLO", "device_id": d.deviceID, "name": d.name,
-		"platform": runtime.GOOS, "architecture": runtime.GOARCH, "capabilities": d.capabilities(), "sent_at": time.Now().UTC(),
+		"platform": runtime.GOOS, "architecture": runtime.GOARCH, "capabilities": d.capabilities(),
+		"capability_instances": d.capabilityInstances(), "sent_at": time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
@@ -199,13 +219,13 @@ func (d *deviceRuntime) connectEndpoint(ctx context.Context, endpoint string) er
 		switch envelope.Type {
 		case "ACTION":
 			var action deviceAction
-			if err := json.Unmarshal([]byte(payload), &action); err != nil {
+			if err := decodeDeviceProtocol([]byte(payload), &action); err != nil {
 				continue
 			}
 			go d.runAction(ctx, writer, action)
 		case "CANCEL":
 			var cancel deviceCancel
-			if err := json.Unmarshal([]byte(payload), &cancel); err == nil {
+			if err := decodeDeviceProtocol([]byte(payload), &cancel); err == nil {
 				d.cancelAction(cancel.ActionID)
 			}
 		}
@@ -251,9 +271,10 @@ func (d *deviceRuntime) runAction(parent context.Context, writer *deviceWriter, 
 		d.mu.Unlock()
 		cancel()
 		_ = writer.Send(deviceObservation{
-			Protocol: deviceProtocol, Type: "OBSERVATION", TaskID: action.TaskID,
-			ActionID: action.ActionID, SessionID: action.SessionID, Sequence: action.Sequence,
-			Status: "FAILED", ObservedAt: time.Now().UTC(), Error: "action is already running",
+			Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
+			TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
+			SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
+			Status: "FAILED", FinishedAt: time.Now().UTC(), ObservedAt: time.Now().UTC(), Error: "action is already running",
 		})
 		return
 	}
@@ -303,16 +324,60 @@ func (d *deviceRuntime) capabilities() []string {
 	return capabilities
 }
 
-func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progress func(deviceProgress)) deviceObservation {
-	base := deviceObservation{Protocol: deviceProtocol, Type: "OBSERVATION", TaskID: action.TaskID, ActionID: action.ActionID, SessionID: action.SessionID, Sequence: action.Sequence, ObservedAt: time.Now().UTC()}
-	if action.ActionID == "" || action.TaskID == "" || action.IdempotencyKey == "" || action.Capability == "" {
-		base.Status, base.Error = "FAILED", "invalid action envelope"
+func (d *deviceRuntime) capabilityInstances() []map[string]any {
+	capabilities := d.capabilities()
+	instances := make([]map[string]any, 0, len(capabilities))
+	for _, capability := range capabilities {
+		instances = append(instances, map[string]any{
+			"instance_id": d.capabilityInstanceID(capability),
+			"capability":  capability,
+			"version":     "0.2",
+		})
+	}
+	return instances
+}
+
+func (d *deviceRuntime) capabilityInstanceID(capability string) string {
+	return d.deviceID + ":" + strings.ReplaceAll(capability, ".", "-")
+}
+
+func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progress func(deviceProgress)) (result deviceObservation) {
+	if strings.TrimSpace(action.TraceID) != "" {
+		ctx = log.WithReqID(ctx, action.TraceID)
+	}
+	startedAt := time.Now().UTC()
+	executionSpan := log.StartSpan(ctx, "device.execute",
+		"task_id", action.TaskID,
+		"action_id", action.ActionID,
+		"device_id", d.deviceID,
+		"capability", action.Capability,
+	)
+	base := deviceObservation{
+		Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: newDeviceProtocolID("observation"),
+		TaskID: action.TaskID, StepID: action.StepID, ActionID: action.ActionID, DeviceID: d.deviceID,
+		TraceID: action.TraceID, SessionID: action.SessionID, Sequence: action.Sequence, Revision: action.Revision,
+		StartedAt: startedAt, ObservedAt: startedAt,
+	}
+	defer func() {
+		finishedAt := time.Now().UTC()
+		result.FinishedAt = finishedAt
+		result.ObservedAt = finishedAt
+		executionSpan.End(deviceObservationError(result),
+			"outcome_status", result.Status,
+			"session_id", result.SessionID,
+			"evidence_count", len(result.Evidence),
+			"attachment_count", len(result.Attachments),
+		)
+	}()
+	if err := action.Validate(); err != nil {
+		base.Status, base.Error = "FAILED", "invalid action envelope: "+err.Error()
 		return base
 	}
-	if !validDevicePolicy(action.Policy) {
-		base.Status, base.Error = "FAILED", "invalid action policy"
+	if action.CapabilityInstanceID != "" && action.CapabilityInstanceID != d.capabilityInstanceID(action.Capability) {
+		base.Status, base.Error = "FAILED", "capability instance does not belong to this device runtime"
 		return base
 	}
+	action.Policy.Risk = raiseDeviceRisk(action.Policy.Risk, minimumDeviceRisk(action))
 	if action.Deadline.IsZero() || time.Now().After(action.Deadline) {
 		base.Status, base.Error = "EXPIRED", "action deadline has expired"
 		return base
@@ -322,26 +387,41 @@ func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progre
 		d.mu.Unlock()
 		return completed
 	}
-	previous := d.sequences[action.TaskID]
-	if action.Sequence != previous+1 {
-		d.mu.Unlock()
-		base.Status, base.Error = "FAILED", fmt.Sprintf("action sequence is out of order: got %d, want %d", action.Sequence, previous+1)
+	d.mu.Unlock()
+	if err := d.beginDurableAction(action); err != nil {
+		base.Status, base.Error = "FAILED", err.Error()
 		return base
 	}
-	if d.sequences == nil {
-		d.sequences = make(map[string]int64)
-	}
-	d.sequences[action.TaskID] = action.Sequence
-	d.mu.Unlock()
 	if action.Policy.Decision == "BLOCK" {
 		base.Status, base.Error = "BLOCKED", "action is blocked by policy"
-		d.remember(action.IdempotencyKey, base)
+		if err := d.remember(action, base); err != nil {
+			base.Status, base.Error = "FAILED", "blocked outcome could not be persisted: "+err.Error()
+		}
 		return base
 	}
 	if action.Policy.Decision == "ASK_USER" {
 		base.Status, base.Error = "WAITING_APPROVAL", "desktop approval is required"
-		d.remember(action.IdempotencyKey, base)
+		if err := d.releaseDurableAction(action); err != nil {
+			base.Status, base.Error = "FAILED", "approval deferral could not be persisted: "+err.Error()
+		}
 		return base
+	}
+	var perceptionSpan *log.Span
+	if strings.HasPrefix(action.Capability, "browser.") {
+		perceptionSpan = log.StartSpan(ctx, "perception.observe",
+			"task_id", action.TaskID,
+			"action_id", action.ActionID,
+			"capability", action.Capability,
+			"requested_session_id", action.SessionID,
+		)
+		defer func() {
+			perceptionSpan.End(deviceObservationError(result),
+				"outcome_status", result.Status,
+				"session_id", result.SessionID,
+				"state_field_count", len(result.State),
+				"evidence_count", len(result.Evidence),
+			)
+		}()
 	}
 	state, sessionID, err := d.executeCapability(ctx, action, progress)
 	base.SessionID = sessionID
@@ -372,8 +452,45 @@ func (d *deviceRuntime) execute(ctx context.Context, action deviceAction, progre
 	} else {
 		base.Status = "SUCCEEDED"
 	}
-	d.remember(action.IdempotencyKey, base)
+	if err := d.remember(action, base); err != nil {
+		base.Status = "FAILED"
+		base.Error = "action outcome could not be persisted: " + err.Error()
+		if base.State == nil {
+			base.State = make(map[string]any)
+		}
+		base.State["verification_required"] = true
+		base.State["journal_persisted"] = false
+	}
 	return base
+}
+
+func deviceObservationError(observation deviceObservation) error {
+	switch observation.Status {
+	case "FAILED", "CANCELLED", "EXPIRED":
+		if strings.TrimSpace(observation.Error) != "" {
+			return fmt.Errorf("%s", observation.Error)
+		}
+		return fmt.Errorf("device observation ended with status %s", observation.Status)
+	default:
+		return nil
+	}
+}
+
+func minimumDeviceRisk(action deviceAction) string {
+	switch action.Capability {
+	case "app.close", "browser.click", "browser.play", "browser.pause", "browser.type", "browser.press", "browser.download", "browser.close":
+		return deviceRiskReversible
+	default:
+		return deviceRiskReadOnly
+	}
+}
+
+func raiseDeviceRisk(serverRisk, localRisk string) string {
+	rank := map[string]int{deviceRiskReadOnly: 0, deviceRiskReversible: 1, deviceRiskExternalWrite: 2, deviceRiskSensitive: 3}
+	if rank[localRisk] > rank[serverRisk] {
+		return localRisk
+	}
+	return serverRisk
 }
 
 func browserChallengeDetected(state map[string]any) bool {
@@ -411,18 +528,9 @@ func browserUserInterventionMessage(state map[string]any) string {
 }
 
 func validDevicePolicy(policy devicePolicy) bool {
-	riskValid := policy.Risk == "LOW" || policy.Risk == "MEDIUM" || policy.Risk == "HIGH"
+	riskValid := policy.Risk == deviceRiskReadOnly || policy.Risk == deviceRiskReversible || policy.Risk == deviceRiskExternalWrite || policy.Risk == deviceRiskSensitive
 	decisionValid := policy.Decision == "ALLOW" || policy.Decision == "ASK_USER" || policy.Decision == "BLOCK"
 	return riskValid && decisionValid
-}
-
-func (d *deviceRuntime) remember(key string, observation deviceObservation) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.completed) >= 4096 {
-		d.completed = make(map[string]deviceObservation)
-	}
-	d.completed[key] = observation
 }
 
 func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceAction, progress func(deviceProgress)) (map[string]any, string, error) {
@@ -450,7 +558,8 @@ func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceActi
 				}
 				progress(deviceProgress{
 					Protocol: deviceProtocol, Type: "PROGRESS", TaskID: action.TaskID, ActionID: action.ActionID,
-					SessionID: sessionID, Sequence: action.Sequence, Stage: update.Stage, Message: update.Message,
+					StepID: action.StepID, TraceID: action.TraceID, DeviceID: d.deviceID, SessionID: sessionID,
+					Sequence: action.Sequence, Revision: action.Revision, Stage: update.Stage, Message: update.Message,
 					Progress: update.Progress, Bytes: update.Bytes, Total: update.Total, State: update.State, SentAt: time.Now().UTC(),
 				})
 			},
@@ -518,7 +627,8 @@ func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceActi
 				}
 				progress(deviceProgress{
 					Protocol: deviceProtocol, Type: "PROGRESS", TaskID: action.TaskID, ActionID: action.ActionID,
-					SessionID: sessionID, Sequence: action.Sequence, Stage: update.Stage, Message: update.Message,
+					StepID: action.StepID, TraceID: action.TraceID, DeviceID: d.deviceID, SessionID: sessionID,
+					Sequence: action.Sequence, Revision: action.Revision, Stage: update.Stage, Message: update.Message,
 					Progress: update.Progress, Bytes: update.Bytes, Total: update.Total, State: update.State, SentAt: time.Now().UTC(),
 				})
 			},

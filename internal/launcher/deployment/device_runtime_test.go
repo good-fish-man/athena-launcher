@@ -59,14 +59,28 @@ func TestDeviceRuntimeTokenUsesRemoteTokenWhenConfigured(t *testing.T) {
 	}
 }
 
+func testDeviceAction(capability string) deviceAction {
+	now := time.Now().UTC()
+	return deviceAction{
+		Protocol: deviceProtocol, Type: "ACTION", TaskID: "task", StepID: "step-1", ActionID: "action-1",
+		TraceID:  "trace-device-1",
+		Sequence: 1, Revision: 1, IdempotencyKey: "task:step-1:action-1", IssuedAt: now,
+		Deadline: now.Add(time.Second), Capability: capability,
+		Policy: devicePolicy{Risk: deviceRiskReadOnly, Decision: "ALLOW"},
+	}
+}
+
 func TestDeviceRuntimeRejectsExpiredAction(t *testing.T) {
 	runtime := &deviceRuntime{completed: make(map[string]deviceObservation), inflight: make(map[string]context.CancelFunc)}
-	observation := runtime.execute(context.Background(), deviceAction{
-		TaskID: "task", ActionID: "action", Sequence: 1, IdempotencyKey: "task:1",
-		Capability: "browser.open", Deadline: time.Now().Add(-time.Second), Policy: devicePolicy{Risk: "LOW", Decision: "ALLOW"},
-	}, nil)
+	action := testDeviceAction("browser.open")
+	action.IssuedAt = time.Now().Add(-2 * time.Second)
+	action.Deadline = time.Now().Add(-time.Second)
+	observation := runtime.execute(context.Background(), action, nil)
 	if observation.Status != "EXPIRED" {
 		t.Fatalf("unexpected observation: %+v", observation)
+	}
+	if observation.TraceID != action.TraceID {
+		t.Fatalf("observation trace_id = %q, want %q", observation.TraceID, action.TraceID)
 	}
 }
 
@@ -74,10 +88,7 @@ func TestDeviceRuntimeReportsCancelledAction(t *testing.T) {
 	runtime := &deviceRuntime{completed: make(map[string]deviceObservation), inflight: make(map[string]context.CancelFunc)}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	observation := runtime.execute(ctx, deviceAction{
-		TaskID: "task", ActionID: "action", Sequence: 1, IdempotencyKey: "task:1",
-		Capability: "unsupported", Deadline: time.Now().Add(time.Second), Policy: devicePolicy{Risk: "LOW", Decision: "ALLOW"},
-	}, nil)
+	observation := runtime.execute(ctx, testDeviceAction("unsupported"), nil)
 	if observation.Status != "CANCELLED" {
 		t.Fatalf("unexpected observation: %+v", observation)
 	}
@@ -85,10 +96,10 @@ func TestDeviceRuntimeReportsCancelledAction(t *testing.T) {
 
 func TestDeviceRuntimeRejectsOutOfOrderAction(t *testing.T) {
 	runtime := &deviceRuntime{completed: make(map[string]deviceObservation), inflight: make(map[string]context.CancelFunc), sequences: make(map[string]int64)}
-	observation := runtime.execute(context.Background(), deviceAction{
-		TaskID: "task", ActionID: "action-2", Sequence: 2, IdempotencyKey: "task:2",
-		Capability: "app.open", Deadline: time.Now().Add(time.Second), Policy: devicePolicy{Risk: "LOW", Decision: "BLOCK"},
-	}, nil)
+	action := testDeviceAction("app.open")
+	action.ActionID, action.StepID, action.Sequence, action.IdempotencyKey = "action-2", "step-2", 2, "task:step-2:action-2"
+	action.Policy.Decision = "BLOCK"
+	observation := runtime.execute(context.Background(), action, nil)
 	if observation.Status != "FAILED" {
 		t.Fatalf("unexpected observation: %+v", observation)
 	}
@@ -96,14 +107,119 @@ func TestDeviceRuntimeRejectsOutOfOrderAction(t *testing.T) {
 
 func TestDeviceRuntimeDeduplicatesBlockedAction(t *testing.T) {
 	runtime := &deviceRuntime{completed: make(map[string]deviceObservation), inflight: make(map[string]context.CancelFunc), sequences: make(map[string]int64)}
-	action := deviceAction{
-		TaskID: "task", ActionID: "action-1", Sequence: 1, IdempotencyKey: "task:1",
-		Capability: "app.open", Deadline: time.Now().Add(time.Second), Policy: devicePolicy{Risk: "LOW", Decision: "BLOCK"},
-	}
+	action := testDeviceAction("app.open")
+	action.Policy.Decision = "BLOCK"
 	first := runtime.execute(context.Background(), action, nil)
 	second := runtime.execute(context.Background(), action, nil)
 	if first.Status != "BLOCKED" || second.Status != first.Status || second.Error != first.Error {
 		t.Fatalf("observations were not deduplicated: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestDeviceRuntimeDoesNotCachePendingApproval(t *testing.T) {
+	runtime := &deviceRuntime{
+		completed: make(map[string]deviceObservation), inflight: make(map[string]context.CancelFunc),
+		durable: make(map[string]journalAction), sequences: make(map[string]int64),
+	}
+	action := testDeviceAction("app.open")
+	action.Policy.Decision = "ASK_USER"
+	waiting := runtime.execute(context.Background(), action, nil)
+	if waiting.Status != "WAITING_APPROVAL" {
+		t.Fatalf("unexpected approval observation: %+v", waiting)
+	}
+	if _, cached := runtime.completed[action.IdempotencyKey]; cached {
+		t.Fatal("pending approval was cached as a completed outcome")
+	}
+	if _, pending := runtime.durable[action.IdempotencyKey]; pending {
+		t.Fatal("pending approval retained an in-flight journal entry")
+	}
+	if runtime.sequences[action.TaskID] != 0 {
+		t.Fatalf("pending approval advanced sequence to %d", runtime.sequences[action.TaskID])
+	}
+	action.Policy.Decision = "BLOCK"
+	blocked := runtime.execute(context.Background(), action, nil)
+	if blocked.Status != "BLOCKED" {
+		t.Fatalf("same idempotency key could not continue after decision: %+v", blocked)
+	}
+}
+
+func TestDeviceRuntimeCapabilityInstancesAreStableAndUnique(t *testing.T) {
+	runtime := &deviceRuntime{deviceID: "device-1", bridge: newDesktopBridge(t.TempDir(), nil)}
+	instances := runtime.capabilityInstances()
+	seen := make(map[string]string, len(instances))
+	for _, instance := range instances {
+		instanceID, _ := instance["instance_id"].(string)
+		capability, _ := instance["capability"].(string)
+		if instanceID == "" || capability == "" {
+			t.Fatalf("invalid capability instance: %#v", instance)
+		}
+		if previous, exists := seen[instanceID]; exists {
+			t.Fatalf("capabilities %q and %q share instance %q", previous, capability, instanceID)
+		}
+		seen[instanceID] = capability
+		if want := runtime.capabilityInstanceID(capability); instanceID != want {
+			t.Fatalf("instance for %q = %q, want %q", capability, instanceID, want)
+		}
+	}
+}
+
+func TestDeviceRuntimeRejectsForeignCapabilityInstance(t *testing.T) {
+	runtime := &deviceRuntime{
+		deviceID: "device-1", completed: make(map[string]deviceObservation),
+		inflight: make(map[string]context.CancelFunc), sequences: make(map[string]int64),
+	}
+	action := testDeviceAction("app.open")
+	action.CapabilityInstanceID = "device-2:app-open"
+	action.Policy.Decision = "BLOCK"
+	observation := runtime.execute(context.Background(), action, nil)
+	if observation.Status != "FAILED" || observation.Error != "capability instance does not belong to this device runtime" {
+		t.Fatalf("unexpected observation: %+v", observation)
+	}
+}
+
+func TestDeviceRuntimeRaisesButNeverLowersRisk(t *testing.T) {
+	click := testDeviceAction("browser.click")
+	if got := raiseDeviceRisk(click.Policy.Risk, minimumDeviceRisk(click)); got != deviceRiskReversible {
+		t.Fatalf("browser click risk = %q, want %q", got, deviceRiskReversible)
+	}
+	click.Policy.Risk = deviceRiskSensitive
+	if got := raiseDeviceRisk(click.Policy.Risk, minimumDeviceRisk(click)); got != deviceRiskSensitive {
+		t.Fatalf("sensitive server risk was lowered to %q", got)
+	}
+}
+
+func TestNewDeviceRuntimeRepairsRecoveredObservationDeviceID(t *testing.T) {
+	home := t.TempDir()
+	bridge := newDesktopBridge(home, nil)
+	journalPath := filepath.Join(home, "data", "device-action-journal-v4.json")
+	now := time.Now().UTC()
+	journal := deviceActionJournal{
+		Protocol: deviceProtocol,
+		Completed: map[string]deviceObservation{
+			"task:step:action": {
+				Protocol: deviceProtocol, Type: "OBSERVATION", ObservationID: "observation-1",
+				TaskID: "task", StepID: "step", ActionID: "action", Sequence: 1, Revision: 1,
+				Status: "FAILED", FinishedAt: now, ObservedAt: now,
+			},
+		},
+		InFlight: make(map[string]journalAction), Sequences: map[string]int64{"task": 1},
+	}
+	if err := saveDeviceActionJournal(journalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := newDeviceRuntime(&launcherState{DeviceID: "device-1", ConnectionMode: connectionModeLocal}, bridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runtime.completed["task:step:action"].DeviceID; got != "device-1" {
+		t.Fatalf("recovered observation device_id = %q", got)
+	}
+	reloaded, err := loadDeviceActionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.Completed["task:step:action"].DeviceID; got != "device-1" {
+		t.Fatalf("repaired device_id was not persisted: %q", got)
 	}
 }
 

@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORKSPACE=$(CDPATH= cd -- "$ROOT/.." && pwd)
-VERSION=${VERSION:-0.1.5}
+VERSION=${VERSION:-0.2.0}
 TARGET_OS=${TARGET_OS:-$(go env GOOS)}
 TARGET_ARCH=${TARGET_ARCH:-$(go env GOARCH)}
 DIST=${DIST:-dist}

@@ -6,11 +6,11 @@ on:
       tag:
         description: Runtime, client, and frontend release tag
         required: true
-        default: v0.1.5
+        default: v0.2.0
       launcher_tag:
         description: Launcher release receiving the manifest and PostgreSQL assets
         required: true
-        default: v0.1.5
+        default: v0.2.0
       postgres_version:
         description: PostgreSQL binary version
         required: true

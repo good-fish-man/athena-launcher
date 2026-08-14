@@ -1,5 +1,5 @@
 {
-  "version": "0.1.5",
+  "version": "0.2.0",
   "database": {
     "version": "16.13.0",
     "bin_dir": "bin",
@@ -25,11 +25,11 @@
     "listen_addr": "127.0.0.1:3000",
     "root": "",
     "artifacts": {
-      "darwin-arm64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.1.5.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "darwin-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.1.5.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "linux-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.1.5.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "linux-arm64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.1.5.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
-      "windows-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.1.5.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" }
+      "darwin-arm64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
+      "darwin-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
+      "linux-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
+      "linux-arm64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" },
+      "windows-amd64": { "url": "https://releases.example.com/athena/athena-agent-ui_v0.2.0.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "" }
     }
   },
   "services": [
@@ -38,11 +38,11 @@
       "order": 10,
       "health_url": "http://127.0.0.1:18081/healthz",
       "artifacts": {
-        "darwin-arm64": { "url": "https://releases.example.com/athena/agent-runtime_v0.1.5_darwin_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "darwin-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.1.5_darwin_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "linux-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.1.5_linux_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "linux-arm64": { "url": "https://releases.example.com/athena/agent-runtime_v0.1.5_linux_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
-        "windows-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.1.5_windows_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime.exe" }
+        "darwin-arm64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_darwin_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
+        "darwin-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_darwin_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
+        "linux-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_linux_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
+        "linux-arm64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_linux_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime" },
+        "windows-amd64": { "url": "https://releases.example.com/athena/agent-runtime_v0.2.0_windows_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime.exe" }
       }
     },
     {
@@ -50,11 +50,11 @@
       "order": 20,
       "health_url": "http://127.0.0.1:8090/healthz",
       "artifacts": {
-        "darwin-arm64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.1.5_darwin_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "darwin-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.1.5_darwin_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "linux-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.1.5_linux_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "linux-arm64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.1.5_linux_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
-        "windows-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.1.5_windows_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client.exe" }
+        "darwin-arm64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_darwin_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
+        "darwin-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_darwin_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
+        "linux-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_linux_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
+        "linux-arm64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_linux_arm64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client" },
+        "windows-amd64": { "url": "https://releases.example.com/athena/agent-runtime-client_v0.2.0_windows_amd64.tar.gz", "sha256": "REPLACE_WITH_64_CHAR_SHA256", "format": "tar.gz", "executable": "agent-runtime-client.exe" }
       }
     }
   ]
