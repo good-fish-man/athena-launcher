@@ -1,7 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-TAG=${TAG:-v0.1.5}
+TAG=${TAG:-${GITHUB_REF_NAME:-}}
+if [ -z "$TAG" ]; then
+  echo "TAG is required (for example TAG=v0.1.6)" >&2
+  exit 1
+fi
 LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
 AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.33.1}

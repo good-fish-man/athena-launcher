@@ -1,16 +1,34 @@
 name: Publish Release Manifest
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Runtime, client, and frontend release tag
+        required: true
+        type: string
+      launcher_tag:
+        description: Launcher release receiving the manifest and PostgreSQL assets
+        required: true
+        type: string
+      postgres_version:
+        description: PostgreSQL binary version
+        required: false
+        default: 16.13.0
+        type: string
+      agent_browser_version:
+        description: Upstream agent-browser version
+        required: false
+        default: 0.33.1
+        type: string
   workflow_dispatch:
     inputs:
       tag:
         description: Runtime, client, and frontend release tag
         required: true
-        default: v0.1.5
       launcher_tag:
         description: Launcher release receiving the manifest and PostgreSQL assets
         required: true
-        default: v0.1.5
       postgres_version:
         description: PostgreSQL binary version
         required: true
@@ -22,7 +40,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 env:
   SERVICE_TAG: ${{ inputs.tag }}
@@ -106,23 +123,24 @@ jobs:
           TAG: ${{ inputs.tag }}
           LAUNCHER_TAG: ${{ inputs.launcher_tag }}
         run: |
+          set -euo pipefail
           ./scripts/generate-release-manifest.sh
           jq empty release-manifest.json
           go run ./cmd/athena-launcher validate --manifest release-manifest.json
-          sha256sum release-assets/postgres_* release-manifest.json > SHA256SUMS
-      - name: Publish manifest and PostgreSQL assets
+          zip -q release-manifest.zip release-manifest.json
+          sha256sum release-assets/postgres_* release-manifest.json release-manifest.zip > SHA256SUMS
+      - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$LAUNCHER_TAG"
-          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          set -euo pipefail
+          gh release view "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "$LAUNCHER_TAG"
+          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json release-manifest.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
       - uses: actions/upload-artifact@v7
         with:
           name: release-manifest
           path: |
             release-manifest.json
+            release-manifest.zip
             SHA256SUMS
-      - name: Rebuild launchers with embedded manifest URL
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$LAUNCHER_TAG" -f service_tag="$SERVICE_TAG"

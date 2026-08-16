@@ -408,6 +408,7 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *sta
 			return
 		}
 		state.ConnectionMode = selection.Mode
+		state.DeploymentConfigured = true
 		state.RemoteClientURL = selection.RemoteURL
 		state.RemoteDeviceToken = selection.Token
 		if err := saveState(tracker.home, state); err != nil {

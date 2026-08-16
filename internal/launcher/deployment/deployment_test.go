@@ -54,6 +54,17 @@ func TestSavedDeploymentSelectionPreservesLoopbackRemote(t *testing.T) {
 	}
 }
 
+func TestDeploymentSelectionRequiredForLegacyState(t *testing.T) {
+	legacy := &launcherState{ConnectionMode: connectionModeLocal}
+	if !deploymentSelectionRequired(legacy, nil, nil) {
+		t.Fatal("legacy state without explicit deployment confirmation skipped the chooser")
+	}
+	configured := &launcherState{ConnectionMode: connectionModeLocal, DeploymentConfigured: true}
+	if deploymentSelectionRequired(configured, nil, nil) {
+		t.Fatal("explicitly configured deployment requested another choice")
+	}
+}
+
 func TestDeploymentEndpointPersistsSelection(t *testing.T) {
 	home := t.TempDir()
 	tracker := newStartupTracker(home)
@@ -71,7 +82,7 @@ func TestDeploymentEndpointPersistsSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.ConnectionMode != connectionModeRemote || state.RemoteClientURL != "https://athena.example.com" || state.RemoteDeviceToken != "device-secret" {
+	if !state.DeploymentConfigured || state.ConnectionMode != connectionModeRemote || state.RemoteClientURL != "https://athena.example.com" || state.RemoteDeviceToken != "device-secret" {
 		t.Fatalf("persisted deployment = %q %q token=%q", state.ConnectionMode, state.RemoteClientURL, state.RemoteDeviceToken)
 	}
 	select {
