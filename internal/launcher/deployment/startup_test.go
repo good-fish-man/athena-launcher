@@ -120,6 +120,14 @@ func TestStartupHandlerExposesStatusAndKnownLogs(t *testing.T) {
 
 func TestStartupBrowserSettingsEndpointPersistsMode(t *testing.T) {
 	home := t.TempDir()
+	chromeHome := filepath.Join(home, "chrome")
+	if err := os.MkdirAll(filepath.Join(chromeHome, "Default"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(chromeHome, "Local State"), []byte(`{"profile":{"last_used":"Default","info_cache":{"Default":{"name":"Personal","user_name":"user@example.com"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATHENA_CHROME_USER_DATA_DIR", chromeHome)
 	tracker := newStartupTracker(home)
 	handler := startupHandler(tracker, make(chan struct{}, 1), newStartupController())
 
@@ -148,14 +156,16 @@ func TestStartupBrowserSettingsEndpointPersistsMode(t *testing.T) {
 
 func TestBrowserSettingsClearsProfileOutsideProfileMode(t *testing.T) {
 	state := &launcherState{BrowserAuthMode: browser_runtime.AuthModeProfile, BrowserProfile: "Default"}
-	browser_runtime.ApplySettings(state, browser_runtime.SettingsRequest{Mode: browser_runtime.AuthModeIsolated, Profile: "Default"})
+	if err := browser_runtime.ApplySettings(state, browser_runtime.SettingsRequest{Mode: browser_runtime.AuthModeIsolated, Profile: "Default"}); err != nil {
+		t.Fatal(err)
+	}
 	if state.BrowserAuthMode != browser_runtime.AuthModeIsolated || state.BrowserProfile != "" {
 		t.Fatalf("browser settings = %q %q, want isolated with empty profile", state.BrowserAuthMode, state.BrowserProfile)
 	}
 }
 
 func TestStartupPageContainsLiveStatusUI(t *testing.T) {
-	for _, expected := range []string{"Startup Center", "/api/status", "/api/log?source=", "/api/update/apply", "/api/browser-settings", "Browser control mode", "Auto connect", "Update and restart", "Open Athena"} {
+	for _, expected := range []string{"Startup Center", "/api/status", "/api/log?source=", "/api/update/apply", "/api/browser-settings", "/api/browser-auth/start", "Browser control mode", "Auto connect", "Open sign-in browser", "Update and restart", "Open Athena"} {
 		if !strings.Contains(startupPageHTML, expected) {
 			t.Fatalf("startup page is missing %q", expected)
 		}
@@ -166,8 +176,8 @@ func TestStartupPageAutoSavesBrowserSettings(t *testing.T) {
 	for _, expected := range []string{
 		"Changes are saved automatically.",
 		"scheduleBrowserSettingsSave()",
-		"browserProfileInput.oninput",
 		"browserProfileInput.onchange",
+		"browser-profile-refresh",
 	} {
 		if !strings.Contains(startupPageHTML, expected) {
 			t.Fatalf("startup page is missing browser auto-save behavior %q", expected)

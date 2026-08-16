@@ -101,9 +101,13 @@ func TestBrowserSessionArgsUseExecutableOverride(t *testing.T) {
 
 func TestBrowserSessionArgsSupportProfileAuthMode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("ATHENA_BROWSER_AUTH_MODE", "profile")
-	args := browser_runtime.NewController(home).SessionArgs("athena-00000000000000000000000000000000")
 	wantProfile := filepath.Join(home, "browser", "profiles", "default")
+	if err := os.MkdirAll(wantProfile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATHENA_BROWSER_AUTH_MODE", "profile")
+	t.Setenv("ATHENA_BROWSER_PROFILE", wantProfile)
+	args := browser_runtime.NewController(home).SessionArgs("athena-00000000000000000000000000000000")
 	if !containsString(args, "--profile") || !containsString(args, wantProfile) {
 		t.Fatalf("profile auth mode missing profile args: %v", args)
 	}

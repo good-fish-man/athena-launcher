@@ -93,6 +93,20 @@ The Launcher browser path keeps the existing browser managers as observation pro
 | Cookie Manager | Reads cookie status with `agent-browser cookies get --json`, reports only counts/domains/session-cookie summary, and never exposes cookie values. |
 | Session Manager | Creates one stable default `athena-*` browser session for normal opens, supports explicit isolated sessions when requested, persists active sessions, and preserves continuity across restarts. |
 
+## Browser Authentication Modes
+
+The Startup Center discovers Chrome profiles from the browser's local `Local State` file. It shows the profile display name, directory, detected account, and last-used marker. A profile setting is rejected when it does not exist on the current computer; Athena never silently creates an empty profile from a misspelled name.
+
+| Mode | Authentication behavior | Use when |
+| --- | --- | --- |
+| `isolated` | Uses Athena's private persisted browser state. It does not read a personal Chrome profile. | The task does not need an existing login, or the user wants strict separation. |
+| `profile` | Imports a temporary snapshot of the selected local Chrome profile through `agent-browser`. Changes made in the copied window are not written back to the personal profile. | The detected profile already contains a reusable website login. Sign in with regular Chrome first, then refresh the profile list. |
+| `auto_connect` | Attaches to an already-running Chrome CDP session and leaves that browser process owned by the user. The Startup Center can launch an official Chrome window backed by Athena's persistent non-default profile for this mode. | Live authenticated browsing, protected media, or continued manual/browser-agent collaboration. |
+
+`profile` is not equivalent to controlling the user's existing Chrome window. Chrome may refuse copied authentication data, particularly with App-Bound Encryption on Windows. Chrome 136 and later also ignore remote-debugging switches for the default Chrome user-data directory. Therefore `auto_connect` must target a CDP-enabled non-default user-data directory; Athena reports this requirement rather than claiming that `Default` always preserves login state.
+
+The **Open sign-in browser** action starts the installed Google Chrome binary with only loopback CDP, a dedicated `~/.athena/browser/authenticated-profile` user-data directory, and no `--disable-sync`, mock-keychain, or basic-password-store flags. The user signs in in that visible window once and keeps it running while Athena controls it. Chrome output is written to `~/.athena/logs/browser-auth.log`. CDP grants full browser control to local processes, so this mode is intended only for a trusted personal computer.
+
 Observation state is persisted under the Athena home directory as `data/browser-runtime-state.json`. The state contains workspace/session/tab metadata only; it does not store raw cookies, passwords, tokens, or page secrets.
 
 Every browser Observation now includes:

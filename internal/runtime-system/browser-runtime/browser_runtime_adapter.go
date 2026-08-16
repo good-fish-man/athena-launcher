@@ -96,8 +96,8 @@ func SettingsFromState(home string, state *statepkg.State) SettingsResponse {
 	return browserSettingsFromState(home, state)
 }
 
-func ApplySettings(state *statepkg.State, request SettingsRequest) {
-	applyBrowserSettings(state, request)
+func ApplySettings(state *statepkg.State, request SettingsRequest) error {
+	return applyBrowserSettings(state, request)
 }
 
 func newBrowserRuntime(home string) *browserRuntime {

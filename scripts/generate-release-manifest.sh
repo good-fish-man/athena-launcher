@@ -3,12 +3,12 @@ set -eu
 
 TAG=${TAG:-${GITHUB_REF_NAME:-}}
 if [ -z "$TAG" ]; then
-  echo "TAG is required (for example TAG=v0.1.6)" >&2
+  echo "TAG is required (for example TAG=v0.1.7)" >&2
   exit 1
 fi
 LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
-AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.33.1}
+AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.34.0}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
 RUNTIME_REPO=${RUNTIME_REPO:-good-fish-man/agent-runtime}
