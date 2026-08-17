@@ -23,6 +23,7 @@ type State struct {
 	ManifestSource       string            `json:"manifest_source,omitempty"`
 	Version              string            `json:"version,omitempty"`
 	ConnectionMode       string            `json:"connection_mode,omitempty"`
+	DeploymentConfigured bool              `json:"deployment_configured,omitempty"`
 	RemoteClientURL      string            `json:"remote_client_url,omitempty"`
 	RemoteDeviceToken    string            `json:"remote_device_token,omitempty"`
 	DBPassword           string            `json:"db_password"`

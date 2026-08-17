@@ -81,3 +81,7 @@ func deploymentFromState(state *launcherState) deploymentSelection {
 	}
 	return deploymentSelection{Mode: connectionModeLocal}
 }
+
+func deploymentSelectionRequired(state *launcherState, stateErr, selectionErr error) bool {
+	return stateErr != nil || selectionErr != nil || state == nil || state.ConnectionMode == "" || !state.DeploymentConfigured
+}

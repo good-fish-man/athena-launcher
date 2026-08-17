@@ -1,10 +1,14 @@
 #!/usr/bin/env sh
 set -eu
 
-TAG=${TAG:-v1.0.0}
+TAG=${TAG:-${GITHUB_REF_NAME:-}}
+if [ -z "$TAG" ]; then
+  echo "TAG is required (for example TAG=v1.0.0)" >&2
+  exit 1
+fi
 LAUNCHER_TAG=${LAUNCHER_TAG:-$TAG}
 POSTGRES_VERSION=${POSTGRES_VERSION:-16.13.0}
-AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.33.1}
+AGENT_BROWSER_VERSION=${AGENT_BROWSER_VERSION:-0.34.0}
 ASSET_DIR=${ASSET_DIR:-release-assets}
 OUTPUT=${OUTPUT:-release-manifest.json}
 SBOM_FILE=${SBOM_FILE:-release-sbom.spdx.json}

@@ -32,10 +32,10 @@
     }
   },
   "browser": {
-    "version": "0.33.1",
+    "version": "0.34.0",
     "artifacts": {
       "darwin-arm64": {
-        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.33.1/agent-browser-darwin-arm64",
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.34.0/agent-browser-darwin-arm64",
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
         "size_bytes": 52428800,
         "sbom_sha256": "0000000000000000000000000000000000000000000000000000000000000000",

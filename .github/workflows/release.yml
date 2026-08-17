@@ -195,15 +195,24 @@ jobs:
         with:
           path: release
           merge-multiple: true
-      - name: Publish GitHub Release
+      - name: Upload launcher assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           sha256sum release/* > SHA256SUMS-launchers.txt
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "$RELEASE_TAG"
           gh release upload "$RELEASE_TAG" release/* SHA256SUMS-launchers.txt LICENSE NOTICE THIRD_PARTY_NOTICES.md --repo "$GITHUB_REPOSITORY" --clobber
-      - name: Generate release manifest
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run publish-manifest.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$SERVICE_TAG" -f launcher_tag="$RELEASE_TAG"
+
+  manifest:
+    if: github.event_name == 'push'
+    needs: publish
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/publish-manifest.yml
+    with:
+      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.service_tag || github.ref_name }}
+      launcher_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      minimum_from_version: 0.9.0
+    secrets: inherit

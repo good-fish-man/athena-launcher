@@ -10,12 +10,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,17 +32,42 @@ var downloadClient = &http.Client{
 }
 
 const (
-	databaseArtifactMarkerVersion = "2"
-	maxArtifactDownloadBytes      = int64(64 << 30)
-	maxArchiveEntries             = 100_000
-	maxArchiveFileBytes           = int64(16 << 30)
-	maxArchiveExpandedBytes       = int64(128 << 30)
+	databaseArtifactMarkerVersion       = "2"
+	manifestFileName                    = "release-manifest.json"
+	manifestArchiveName                 = "release-manifest.zip"
+	manifestSizeLimit             int64 = 4 << 20
+	maxArtifactDownloadBytes            = int64(64 << 30)
+	maxArchiveEntries                   = 100_000
+	maxArchiveFileBytes                 = int64(16 << 30)
+	maxArchiveExpandedBytes             = int64(128 << 30)
 )
 
+type httpStatusError struct {
+	statusCode int
+	url        string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("download %s returned HTTP %d", e.url, e.statusCode)
+}
+
 func loadManifest(ctx context.Context, source string) (*Manifest, error) {
-	data, err := readSource(ctx, source, 4<<20)
+	data, err := readSource(ctx, source, manifestSizeLimit)
+	if err != nil {
+		archiveSource, ok := manifestArchiveFallback(source, err)
+		if ok {
+			data, err = readSource(ctx, archiveSource, manifestSizeLimit)
+			if err != nil {
+				return nil, fmt.Errorf("load release manifest %s (archive fallback %s): %w", source, archiveSource, err)
+			}
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load release manifest %s: %w", source, err)
+	}
+	data, err = unpackManifest(data, manifestSizeLimit)
+	if err != nil {
+		return nil, fmt.Errorf("decode release manifest %s: %w", source, err)
 	}
 	var manifest Manifest
 	if err := decodeStrictJSON(data, &manifest); err != nil {
@@ -209,7 +236,7 @@ func readSource(ctx context.Context, source string, limit int64) ([]byte, error)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+			return nil, &httpStatusError{statusCode: resp.StatusCode, url: source}
 		}
 		if resp.ContentLength > limit {
 			return nil, fmt.Errorf("download content length %d exceeds limit %d", resp.ContentLength, limit)
@@ -246,6 +273,59 @@ func readLimited(reader io.Reader, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("content exceeds limit %d", limit)
 	}
 	return data, nil
+}
+
+func manifestArchiveFallback(source string, sourceErr error) (string, bool) {
+	statusErr := &httpStatusError{}
+	if !errors.As(sourceErr, &statusErr) || statusErr.statusCode != http.StatusNotFound {
+		return "", false
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || path.Base(parsed.Path) != manifestFileName {
+		return "", false
+	}
+	parsed.Path = path.Join(path.Dir(parsed.Path), manifestArchiveName)
+	return parsed.String(), true
+}
+
+func unpackManifest(data []byte, limit int64) ([]byte, error) {
+	if !isZipArchive(data) {
+		return data, nil
+	}
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("open ZIP archive: %w", err)
+	}
+	var manifestFile *zip.File
+	for _, candidate := range archive.File {
+		clean := path.Clean(candidate.Name)
+		if clean == "." || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+			return nil, fmt.Errorf("ZIP contains unsafe path %q", candidate.Name)
+		}
+		if candidate.FileInfo().IsDir() || path.Base(clean) != manifestFileName {
+			continue
+		}
+		if manifestFile != nil {
+			return nil, fmt.Errorf("ZIP contains multiple %s files", manifestFileName)
+		}
+		manifestFile = candidate
+	}
+	if manifestFile == nil {
+		return nil, fmt.Errorf("ZIP does not contain %s", manifestFileName)
+	}
+	if manifestFile.UncompressedSize64 > uint64(limit) {
+		return nil, fmt.Errorf("%s exceeds %d byte limit", manifestFileName, limit)
+	}
+	reader, err := manifestFile.Open()
+	if err != nil {
+		return nil, fmt.Errorf("open %s from ZIP: %w", manifestFileName, err)
+	}
+	defer reader.Close()
+	return readLimited(reader, limit)
+}
+
+func isZipArchive(data []byte) bool {
+	return len(data) >= 4 && data[0] == 'P' && data[1] == 'K' && ((data[2] == 3 && data[3] == 4) || (data[2] == 5 && data[3] == 6) || (data[2] == 7 && data[3] == 8))
 }
 
 func installServices(ctx context.Context, home string, manifest *Manifest, state *launcherState) (map[string]string, error) {

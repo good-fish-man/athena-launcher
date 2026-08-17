@@ -1,6 +1,34 @@
 name: Publish Release Manifest
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Runtime, client, and frontend release tag
+        required: true
+        type: string
+      launcher_tag:
+        description: Launcher release receiving the manifest and PostgreSQL assets
+        required: true
+        type: string
+      postgres_version:
+        description: PostgreSQL binary version
+        required: false
+        default: 16.13.0
+        type: string
+      agent_browser_version:
+        description: Upstream agent-browser version
+        required: false
+        default: 0.34.0
+        type: string
+      minimum_from_version:
+        description: Oldest installed Athena version allowed to upgrade directly
+        required: false
+        default: 0.9.0
+        type: string
+    secrets:
+      ATHENA_RELEASE_PRIVATE_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       tag:
@@ -18,7 +46,7 @@ on:
       agent_browser_version:
         description: Upstream agent-browser version
         required: true
-        default: 0.33.1
+        default: 0.34.0
       minimum_from_version:
         description: Oldest installed Athena version allowed to upgrade directly
         required: true
@@ -128,24 +156,29 @@ jobs:
           WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
           LINUX_CODE_SIGNING_STATUS: ${{ vars.LINUX_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
         run: |
+          set -euo pipefail
           test -n "$ATHENA_RELEASE_PRIVATE_KEY" || { echo "::error title=Missing release identity::ATHENA_RELEASE_PRIVATE_KEY is required"; exit 1; }
           ASSET_DIR=release-assets OUTPUT=release-sbom.spdx.json RELEASE_ID="athena-${TAG}" ./scripts/generate-release-sbom.sh
           SBOM_FILE=release-sbom.spdx.json COMPATIBILITY_FILE=compatibility-v1.0.json ./scripts/generate-release-manifest.sh
           go run ./cmd/release-manifest-sign --input release-manifest.json --output release-manifest.json --public-key-output release-public-key.txt
           jq empty release-manifest.json
           ATHENA_RELEASE_PUBLIC_KEY="$(cat release-public-key.txt)" go run ./cmd/athena-launcher validate --manifest release-manifest.json
-          sha256sum release-assets/postgres_* release-manifest.json release-sbom.spdx.json compatibility-v1.0.json > SHA256SUMS
-      - name: Publish manifest and PostgreSQL assets
+          zip -q release-manifest.zip release-manifest.json
+          sha256sum release-assets/postgres_* release-manifest.json release-manifest.zip release-sbom.spdx.json compatibility-v1.0.json > SHA256SUMS
+      - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$LAUNCHER_TAG"
-          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json release-sbom.spdx.json compatibility-v1.0.json release-public-key.txt SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          set -euo pipefail
+          gh release view "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "$LAUNCHER_TAG"
+          gh release upload "$LAUNCHER_TAG" release-assets/postgres_* release-manifest.json release-manifest.zip release-sbom.spdx.json compatibility-v1.0.json release-public-key.txt SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$LAUNCHER_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
       - uses: actions/upload-artifact@v7
         with:
           name: release-manifest
           path: |
             release-manifest.json
+            release-manifest.zip
             release-sbom.spdx.json
             compatibility-v1.0.json
             release-public-key.txt
@@ -153,4 +186,4 @@ jobs:
       - name: Rebuild launchers with embedded manifest URL
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$LAUNCHER_TAG" -f service_tag="$SERVICE_TAG" -f release_public_key="$(cat release-public-key.txt)"
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f tag="$LAUNCHER_TAG" -f service_tag="$SERVICE_TAG" -f release_public_key="$(cat release-public-key.txt)"

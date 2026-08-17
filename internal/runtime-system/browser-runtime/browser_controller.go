@@ -913,22 +913,12 @@ func normalizeBrowserAuthMode(mode string) string {
 }
 
 func browserProfile(home string) string {
-	for _, key := range []string{"ATHENA_BROWSER_PROFILE", "AGENT_BROWSER_PROFILE"} {
-		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-			return value
-		}
-	}
 	if home != "" {
-		if state, err := statepkg.Load(home); err == nil && state != nil && strings.TrimSpace(state.BrowserProfile) != "" {
-			if normalizeBrowserAuthMode(state.BrowserAuthMode) == browserAuthModeProfile {
-				return strings.TrimSpace(state.BrowserProfile)
-			}
+		if state, err := statepkg.Load(home); err == nil {
+			return browserProfileFromState(home, state)
 		}
 	}
-	if home == "" {
-		return ""
-	}
-	return filepath.Join(home, "browser", "profiles", "default")
+	return browserProfileFromState(home, nil)
 }
 
 func preferredBrowserExecutable() string {

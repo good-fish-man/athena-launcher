@@ -434,6 +434,7 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *sta
 			return
 		}
 		state.ConnectionMode = selection.Mode
+		state.DeploymentConfigured = true
 		state.RemoteClientURL = selection.RemoteURL
 		state.RemoteDeviceToken = selection.Token
 		if err := saveState(tracker.home, state); err != nil {
@@ -470,7 +471,10 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *sta
 				http.Error(response, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			browser_runtime.ApplySettings(state, requested)
+			if err := browser_runtime.ApplySettings(state, requested); err != nil {
+				http.Error(response, err.Error(), http.StatusBadRequest)
+				return
+			}
 			if err := saveState(tracker.home, state); err != nil {
 				http.Error(response, err.Error(), http.StatusInternalServerError)
 				return
@@ -480,6 +484,32 @@ func startupHandler(tracker *startupTracker, retry chan<- struct{}, control *sta
 			response.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodPost}, ", "))
 			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+	mux.HandleFunc("/api/browser-auth/start", func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			response.Header().Set("Allow", http.MethodPost)
+			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		state, err := loadState(tracker.home)
+		if err != nil {
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := browser_runtime.ApplySettings(state, browser_runtime.SettingsRequest{Mode: browser_runtime.AuthModeAutoConnect}); err != nil {
+			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := saveState(tracker.home, state); err != nil {
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result, err := browser_runtime.StartAuthenticatedChrome(request.Context(), tracker.home)
+		if err != nil {
+			http.Error(response, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		writeStartupJSON(response, result)
 	})
 	mux.HandleFunc("/api/update/check", func(response http.ResponseWriter, request *http.Request) {
 		if !acceptStartupAction(response, request, control != nil) {

@@ -49,7 +49,7 @@ func launchDesktop(opts options) error {
 	control := newStartupController()
 	state, stateErr := loadState(opts.home)
 	selection, selectionErr := savedDeploymentSelection(state)
-	needsDeployment := stateErr != nil || selectionErr != nil || state == nil || state.ConnectionMode == ""
+	needsDeployment := deploymentSelectionRequired(state, stateErr, selectionErr)
 	if needsDeployment {
 		tracker.awaitDeployment(deploymentFromState(state))
 		if stateErr != nil {
