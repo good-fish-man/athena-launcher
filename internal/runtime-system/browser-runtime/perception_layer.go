@@ -67,7 +67,7 @@ func (e *browserObservationEngine) Observe(request browserExecuteRequest, observ
 	if e.orchestrator == nil {
 		e.orchestrator = perception.NewOrchestrator(perception.DefaultBudget())
 	}
-	return e.orchestrator.Observe(perceptionRequest(request), decorated, perception.Providers{
+	result := e.orchestrator.Observe(perceptionRequest(request), decorated, perception.Providers{
 		Capture: func(capture perception.CaptureRequest) map[string]any {
 			captureRequest := request
 			captureRequest.Arguments = clonePerceptionArguments(request.Arguments)
@@ -82,6 +82,7 @@ func (e *browserObservationEngine) Observe(request browserExecuteRequest, observ
 		},
 		OCR: e.extractOCR,
 	})
+	return attachBrowserResourceIdentity(request, result)
 }
 
 func perceptionRequest(request browserExecuteRequest) perception.Request {
