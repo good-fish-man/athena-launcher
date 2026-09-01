@@ -44,13 +44,13 @@ func requestErrorLogger(component string, next http.Handler) http.Handler {
 		writer := &launcherResponseWriter{ResponseWriter: response, status: http.StatusOK}
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				log.ErrorfCtx(request.Context(), "[%s] panic recovered method=%s path=%s err=%v\n%s", component, request.Method, request.URL.RequestURI(), recovered, debug.Stack())
+				log.Errorf(request.Context(), "[%s] panic recovered method=%s path=%s err=%v\n%s", component, request.Method, request.URL.RequestURI(), recovered, debug.Stack())
 				if !writer.wroteHeader {
 					http.Error(writer, "internal server error", http.StatusInternalServerError)
 				}
 			}
 			if writer.status >= http.StatusBadRequest {
-				log.ErrorwCtx(request.Context(), "launcher request failed",
+				log.Errorw(request.Context(), "launcher request failed",
 					"component", component,
 					"method", request.Method,
 					"path", request.URL.RequestURI(),
