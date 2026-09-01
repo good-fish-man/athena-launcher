@@ -41,11 +41,6 @@ if [ ! -f "$SBOM_FILE" ]; then
   exit 1
 fi
 
-if [ ! -f "$COMPATIBILITY_FILE" ]; then
-  echo "release compatibility matrix is required: $COMPATIBILITY_FILE" >&2
-  exit 1
-fi
-
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -56,6 +51,15 @@ sha256() {
 
 file_size() {
   wc -c < "$1" | tr -d '[:space:]'
+}
+
+release_major() {
+  version=${1#v}
+  version=${version%%.*}
+  case "$version" in
+    ''|*[!0-9]*) printf '0' ;;
+    *) printf '%s' "$version" ;;
+  esac
 }
 
 require_production_signing_status() {
@@ -120,6 +124,20 @@ release_url() {
   printf 'https://github.com/%s/releases/download/%s/%s' "$repo" "$tag" "$asset"
 }
 
+compatibility_url=
+compatibility_sha=
+if [ "$(release_major "$TAG")" -ge 1 ]; then
+  if [ ! -f "$COMPATIBILITY_FILE" ]; then
+    echo "release compatibility matrix is required for $TAG: $COMPATIBILITY_FILE" >&2
+    exit 1
+  fi
+  compatibility_url=$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "compatibility-v1.0.json")
+  compatibility_sha=$(sha256 "$COMPATIBILITY_FILE")
+elif [ -f "$COMPATIBILITY_FILE" ]; then
+  compatibility_url=$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "compatibility-v1.0.json")
+  compatibility_sha=$(sha256 "$COMPATIBILITY_FILE")
+fi
+
 jq -n \
 	--arg schema "athena.release-manifest.v1" \
 	--arg release_id "athena-$TAG" \
@@ -128,8 +146,8 @@ jq -n \
 	--arg minimum_from_version "$MINIMUM_FROM_VERSION" \
 	--arg sbom_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "release-sbom.spdx.json")" \
 	--arg sbom_sha "$(sha256 "$SBOM_FILE")" \
-	--arg compatibility_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "compatibility-v1.0.json")" \
-	--arg compatibility_sha "$(sha256 "$COMPATIBILITY_FILE")" \
+	--arg compatibility_url "$compatibility_url" \
+	--arg compatibility_sha "$compatibility_sha" \
 	--arg issued_at "$ISSUED_AT" \
 	--arg expires_at "$EXPIRES_AT" \
 	--arg darwin_signing "$DARWIN_CODE_SIGNING_STATUS" \
@@ -244,5 +262,11 @@ jq -n \
 	| if .browser then .browser.artifacts |= enrich else . end
 	| .services |= map(.artifacts |= enrich)
 	| if .frontend then .frontend.artifacts |= enrich else . end' > "$OUTPUT"
+
+jq -e '
+  .schema == "athena.release-manifest.v1"
+  and ((.release_id // "") | length > 0)
+  and ((.protocol_version // "") | length > 0)
+' "$OUTPUT" >/dev/null
 
 echo "generated $OUTPUT"

@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for repo in agent-runtime agent-runtime-client athena-agent-ui athena-protocol; do
+          for repo in agent-runtime agent-runtime-client athena-agent-ui; do
             if ! gh release view "$SERVICE_TAG" --repo "good-fish-man/$repo" >/dev/null 2>&1; then
               echo "::error title=Missing service release::good-fish-man/$repo has no GitHub Release named $SERVICE_TAG"
               echo "Create it with: gh workflow run release.yml -R good-fish-man/$repo --ref main -f tag=$SERVICE_TAG"
@@ -80,7 +80,7 @@ jobs:
             fi
           done
           if [ "$missing" -ne 0 ]; then
-            echo "Wait for all three Release workflows to finish, then rerun Publish Release Manifest."
+            echo "Wait for all service Release workflows to finish, then rerun Publish Release Manifest."
             exit 1
           fi
 
@@ -131,7 +131,13 @@ jobs:
           gh release download "$SERVICE_TAG" --repo good-fish-man/agent-runtime-client --pattern "agent-runtime-client_${SERVICE_TAG}_*" --dir release-assets
           gh release download "$SERVICE_TAG" --repo good-fish-man/athena-agent-ui --pattern "athena-agent-ui_${SERVICE_TAG}.tar.gz" --dir release-assets
           gh release download "v$AGENT_BROWSER_VERSION" --repo vercel-labs/agent-browser --pattern "agent-browser-darwin-arm64" --pattern "agent-browser-darwin-x64" --pattern "agent-browser-linux-arm64" --pattern "agent-browser-linux-x64" --pattern "agent-browser-win32-x64.exe" --dir release-assets
-          curl --fail --location --retry 3 "https://raw.githubusercontent.com/good-fish-man/athena-protocol/${SERVICE_TAG}/compatibility/v1.0.json" --output compatibility-v1.0.json
+          version="${SERVICE_TAG#v}"
+          major="${version%%.*}"
+          if [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -ge 1 ]]; then
+            curl --fail --location --retry 3 "https://raw.githubusercontent.com/good-fish-man/athena-protocol/${SERVICE_TAG}/compatibility/v1.0.json" --output compatibility-v1.0.json
+          else
+            printf '{}\n' > compatibility-v1.0.json
+          fi
       - name: Enforce platform signing gate
         env:
           DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
