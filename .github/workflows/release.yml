@@ -28,6 +28,7 @@ env:
   SERVICE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.service_tag || 'v1.0.0' }}
   APPIMAGETOOL_VERSION: 1.9.1
   RELEASE_PUBLIC_KEY: ${{ github.event_name == 'workflow_dispatch' && inputs.release_public_key || '' }}
+  GONOSUMDB: github.com/good-fish-man/*
 
 jobs:
   build:

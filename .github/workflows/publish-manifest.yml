@@ -61,6 +61,7 @@ env:
   POSTGRES_VERSION: ${{ inputs.postgres_version }}
   AGENT_BROWSER_VERSION: ${{ inputs.agent_browser_version }}
   MINIMUM_FROM_VERSION: ${{ inputs.minimum_from_version }}
+  GONOSUMDB: github.com/good-fish-man/*
 
 jobs:
   prerequisites:
