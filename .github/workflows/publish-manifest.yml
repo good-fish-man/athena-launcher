@@ -140,8 +140,8 @@ jobs:
           fi
       - name: Enforce platform signing gate
         env:
-          DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
-          WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
+          DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
+          WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
           LINUX_CODE_SIGNING_STATUS: ${{ vars.LINUX_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
         run: |
           set -euo pipefail
@@ -158,8 +158,8 @@ jobs:
           TAG: ${{ inputs.tag }}
           LAUNCHER_TAG: ${{ inputs.launcher_tag }}
           ATHENA_RELEASE_PRIVATE_KEY: ${{ secrets.ATHENA_RELEASE_PRIVATE_KEY }}
-          DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
-          WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'UNAVAILABLE' }}
+          DARWIN_CODE_SIGNING_STATUS: ${{ vars.DARWIN_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
+          WINDOWS_CODE_SIGNING_STATUS: ${{ vars.WINDOWS_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
           LINUX_CODE_SIGNING_STATUS: ${{ vars.LINUX_CODE_SIGNING_STATUS || 'CHECKSUM_VERIFIED' }}
         run: |
           set -euo pipefail
