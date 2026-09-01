@@ -76,12 +76,16 @@ else
   echo "warning: PostgreSQL license file was not present in $filename; retaining the upstream license URL in ATHENA-POSTGRES-NOTICE.txt" >&2
 fi
 ./scripts/fix-postgres-library-links.sh "$work/package" "$PLATFORM"
-for binary in initdb pg_ctl postgres pg_dump pg_restore; do
-  if [ ! -f "$work/package/bin/$binary$suffix" ]; then
-    echo "PostgreSQL package is missing bin/$binary$suffix" >&2
-    exit 1
-  fi
+for binary in initdb pg_ctl postgres; do
+	if [ ! -f "$work/package/bin/$binary$suffix" ]; then
+		echo "PostgreSQL package is missing bin/$binary$suffix" >&2
+		exit 1
+	fi
 done
+
+if [ ! -f "$work/package/bin/pg_dump$suffix" ] || [ ! -f "$work/package/bin/pg_restore$suffix" ]; then
+	echo "note: upstream embedded package has no pg_dump/pg_restore; Athena Launcher will use encrypted cold recovery points for managed updates" >&2
+fi
 
 cat > "$work/package/ATHENA-POSTGRES-NOTICE.txt" <<EOF
 This package contains PostgreSQL binaries obtained from:
