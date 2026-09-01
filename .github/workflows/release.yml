@@ -74,11 +74,15 @@ jobs:
           if-no-files-found: error
 
   macos-dmg:
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, amd64]
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: amd64
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
