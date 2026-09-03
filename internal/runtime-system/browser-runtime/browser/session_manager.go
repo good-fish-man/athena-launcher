@@ -16,6 +16,15 @@ func (m *browserSessionManager) resolveLocked(requested string, create bool, for
 		return session.ID, nil
 	}
 	if create {
+		if requested != "" {
+			if !browserSessionPattern.MatchString(requested) {
+				return "", fmt.Errorf("invalid browser session id")
+			}
+			session := m.ensureWithIDLocked(requested, targetKey)
+			m.activateLocked(session)
+			m.runtime.saveLocked()
+			return session.ID, nil
+		}
 		sessionID := stableBrowserSessionID(runtimeDefaultSessionKey)
 		session := m.ensureWithIDLocked(sessionID, targetKey)
 		m.activateLocked(session)

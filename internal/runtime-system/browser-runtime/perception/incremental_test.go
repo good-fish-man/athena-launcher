@@ -109,6 +109,25 @@ func TestErrorPageFailsNavigationVerification(t *testing.T) {
 	}
 }
 
+func TestPlaybackAndPauseUseObservedMediaState(t *testing.T) {
+	orchestrator := NewOrchestrator(DefaultBudget())
+	playing := perceptionPage("https://video.example/watch/second", "Second video", "Second video")
+	playing["playback"] = map[string]any{"found": true, "playing": true, "paused": false, "verified": true}
+	playResult := orchestrator.Observe(Request{SessionID: "session-media", Action: "play"}, playing, Providers{})
+	playVerification := perceptionVerification(t, playResult)
+	if playVerification.Status != "verified" || playVerification.Reason != "media_playback_observed" {
+		t.Fatalf("playback verification = %#v", playVerification)
+	}
+
+	paused := perceptionPage("https://video.example/watch/second", "Second video", "Second video")
+	paused["playback"] = map[string]any{"found": true, "playing": false, "paused": true, "verified": true}
+	pauseResult := orchestrator.Observe(Request{SessionID: "session-media", Action: "pause"}, paused, Providers{})
+	pauseVerification := perceptionVerification(t, pauseResult)
+	if pauseVerification.Status != "verified" || pauseVerification.Reason != "media_pause_observed" {
+		t.Fatalf("pause verification = %#v", pauseVerification)
+	}
+}
+
 func TestClearSessionDropsIncrementalBaseline(t *testing.T) {
 	orchestrator := NewOrchestrator(DefaultBudget())
 	request := Request{SessionID: "session-clear", Action: "observe"}

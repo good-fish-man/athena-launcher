@@ -89,8 +89,12 @@ func prepareWithTracker(ctx context.Context, opts options, tracker *startupTrack
 		executables["agent-browser"] = browserExecutable
 	}
 	database := newManagedDatabase(opts.home, databaseDir, manifest.Database.BinDir, state.DBPassword)
-	executables["pg_dump"] = database.binary("pg_dump")
-	executables["pg_restore"] = database.binary("pg_restore")
+	if executable := database.optionalBinary("pg_dump"); executable != "" {
+		executables["pg_dump"] = executable
+	}
+	if executable := database.optionalBinary("pg_restore"); executable != "" {
+		executables["pg_restore"] = executable
+	}
 
 	tracker.begin("frontend-package", "Checking the Athena interface package")
 	if opts.frontendDir != "" {

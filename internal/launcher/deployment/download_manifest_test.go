@@ -6,9 +6,9 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	releasepkg "athena-launcher/internal/release"
 )
 
 func TestLoadManifestAcceptsZIPArchive(t *testing.T) {
@@ -67,7 +69,7 @@ func TestLoadManifestFallsBackToZIPOnJSON404(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive = manifestZIPFor(t, manifestFixture, manifestFileName)
-	t.Setenv("ATHENA_RELEASE_PUBLIC_KEY", base64.RawStdEncoding.EncodeToString(publicKey))
+	useEmbeddedReleasePublicKey(t, publicKey)
 	originalClient := downloadClient
 	downloadClient = server.Client()
 	downloadClient.Timeout = originalClient.Timeout
@@ -84,6 +86,95 @@ func TestLoadManifestFallsBackToZIPOnJSON404(t *testing.T) {
 	want := []string{"/releases/latest/download/" + manifestFileName, "/releases/latest/download/" + manifestArchiveName, "/release-sbom.spdx.json"}
 	if strings.Join(requested, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requested paths = %v, want %v", requested, want)
+	}
+}
+
+func TestLoadManifestFallsBackToZIPWhenJSONIsLegacy(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sbom := []byte(`{"SPDXID":"SPDXRef-DOCUMENT"}`)
+	legacy := []byte(`{"version":"0.1.7","database":{"version":"16.13.0","artifacts":{}},"services":[]}`)
+	var archive []byte
+	var requested []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requested = append(requested, request.URL.Path)
+		switch path.Base(request.URL.Path) {
+		case manifestFileName:
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write(legacy)
+		case manifestArchiveName:
+			response.Header().Set("Content-Type", "application/zip")
+			_, _ = response.Write(archive)
+		case "release-sbom.spdx.json":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write(sbom)
+		default:
+			http.Error(response, "unexpected path", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	manifestFixture := productionManifestFixture(updateTestManifest())
+	manifestFixture.SBOMURL = server.URL + "/release-sbom.spdx.json"
+	sbomDigest := sha256.Sum256(sbom)
+	manifestFixture.SBOMSHA256 = hex.EncodeToString(sbomDigest[:])
+	if err := manifestFixture.Sign(privateKey); err != nil {
+		t.Fatal(err)
+	}
+	archive = manifestZIPFor(t, manifestFixture, manifestFileName)
+	useEmbeddedReleasePublicKey(t, publicKey)
+	originalClient := downloadClient
+	downloadClient = server.Client()
+	downloadClient.Timeout = originalClient.Timeout
+	downloadClient.CheckRedirect = validateDownloadRedirect
+	t.Cleanup(func() { downloadClient = originalClient })
+
+	manifest, err := loadManifest(t.Context(), server.URL+"/releases/latest/download/"+manifestFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.ReleaseID == "" || manifest.ProtocolVersion == "" {
+		t.Fatalf("fallback manifest did not include required metadata: %+v", manifest)
+	}
+	want := []string{"/releases/latest/download/" + manifestFileName, "/releases/latest/download/" + manifestArchiveName, "/release-sbom.spdx.json"}
+	if strings.Join(requested, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requested paths = %v, want %v", requested, want)
+	}
+}
+
+func TestLoadManifestReportsLegacyReleaseAssets(t *testing.T) {
+	legacy := []byte(`{"version":"0.1.7","database":{"version":"16.13.0","artifacts":{}},"services":[]}`)
+	archive := rawManifestZIP(t, legacy, manifestFileName)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch path.Base(request.URL.Path) {
+		case manifestFileName:
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write(legacy)
+		case manifestArchiveName:
+			response.Header().Set("Content-Type", "application/zip")
+			_, _ = response.Write(archive)
+		default:
+			http.Error(response, "unexpected path", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	originalClient := downloadClient
+	downloadClient = server.Client()
+	downloadClient.Timeout = originalClient.Timeout
+	downloadClient.CheckRedirect = validateDownloadRedirect
+	t.Cleanup(func() { downloadClient = originalClient })
+
+	_, err := loadManifest(t.Context(), server.URL+"/releases/latest/download/"+manifestFileName)
+	if err == nil {
+		t.Fatal("loadManifest() accepted legacy release assets")
+	}
+	if !errors.Is(err, releasepkg.ErrManifestIdentityRequired) {
+		t.Fatalf("loadManifest() error = %v, want manifest identity error", err)
+	}
+	if !strings.Contains(err.Error(), "regenerate and re-upload release-manifest.json and release-manifest.zip") {
+		t.Fatalf("loadManifest() did not explain how to repair the release: %v", err)
 	}
 }
 
@@ -110,6 +201,11 @@ func manifestZIPFor(t *testing.T, manifest *Manifest, names ...string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return rawManifestZIP(t, data, names...)
+}
+
+func rawManifestZIP(t *testing.T, data []byte, names ...string) []byte {
+	t.Helper()
 	var buffer bytes.Buffer
 	archive := zip.NewWriter(&buffer)
 	for _, name := range names {

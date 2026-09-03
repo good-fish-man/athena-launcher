@@ -63,8 +63,10 @@ func stopManaged(home string) error {
 		fmt.Println("Stop requested; no managed launcher PID was recorded.")
 		return nil
 	}
+	launcherPID := state.LauncherPID
 	for attempt := 0; attempt < 40; attempt++ {
-		if !healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort)) {
+		current, err := loadState(home)
+		if err == nil && (current == nil || current.LauncherPID == 0 || current.LauncherPID != launcherPID) {
 			fmt.Println("Athena stopped.")
 			return nil
 		}
@@ -97,7 +99,7 @@ func printStatus(home string) {
 	clientHealthy := healthyURL(fmt.Sprintf("http://127.0.0.1:%d/healthz", defaultClientHTTPPort))
 	browserUI := healthyURL(fmt.Sprintf("http://127.0.0.1:%d/", defaultFrontendPort))
 	desktopUI := pid > 0 && clientHealthy && !browserUI
-	fmt.Printf("PostgreSQL: %s\n", statusLabel(tcpReachable(defaultDatabasePort)))
+	fmt.Printf("PostgreSQL: %s\n", statusLabel(tcpReachable(databasePort())))
 	fmt.Printf("agent-runtime: %s\n", statusLabel(runtimeHealthy))
 	fmt.Printf("agent-runtime-client: %s\n", statusLabel(clientHealthy))
 	if desktopUI {
@@ -112,7 +114,7 @@ func printStatus(home string) {
 	}
 }
 
-func watchStopRequest(ctx context.Context, cancel context.CancelFunc, path string) {
+func watchStopRequest(ctx context.Context, cancel func(), path string) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {

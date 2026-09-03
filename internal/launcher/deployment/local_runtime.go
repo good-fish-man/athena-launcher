@@ -12,7 +12,15 @@ import (
 
 func runForeground(opts options) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), terminationSignals()...)
-	defer cancel()
+	deviceDone, err := startHeadlessDeviceRuntime(ctx, opts)
+	if err != nil {
+		cancel()
+		return err
+	}
+	defer func() {
+		cancel()
+		waitForDeviceRuntime(deviceDone, 20*time.Second)
+	}()
 	stopPath := filepath.Join(opts.home, "stop.request")
 	_ = os.Remove(stopPath)
 	go watchStopRequest(ctx, cancel, stopPath)
@@ -35,6 +43,36 @@ func runForeground(opts options) error {
 			return nil
 		}
 		if errors.Is(err, errUpdateRequested) {
+			tracker.protectingUpdate()
+			backupCtx, backupCancel := context.WithTimeout(ctx, 15*time.Minute)
+			state, stateErr := loadState(opts.home)
+			var backupErr error
+			switch {
+			case stateErr != nil:
+				backupErr = fmt.Errorf("load installation identity before update recovery point: %w", stateErr)
+			case deploymentFromState(state).Mode == connectionModeRemote:
+				// Remote mode updates only the local UI/browser shell and must never
+				// inspect or mutate a server-side database.
+				tracker.applyingUpdate()
+			default:
+				manifest, manifestErr := loadInstalledManifest(opts.home)
+				if manifestErr != nil {
+					backupErr = fmt.Errorf("load installed release before update recovery point: %w", manifestErr)
+				} else {
+					var recovery *managedRecoveryPoint
+					recovery, backupErr = createManagedPostgresRecoveryPoint(backupCtx, opts.home, state.BackupEncryptionKey, manifest.Version)
+					if backupErr == nil {
+						fmt.Printf("[update] encrypted managed PostgreSQL recovery point created and verified: %s\n", recovery.BackupID)
+					}
+				}
+			}
+			backupCancel()
+			if backupErr != nil {
+				fmt.Fprintln(os.Stderr, "[update] pre-update recovery point failed:", backupErr)
+				tracker.updateProtectionError(backupErr)
+				updateApproved = false
+				continue
+			}
 			updateApproved = true
 			tracker.reset()
 			tracker.applyingUpdate()
@@ -53,6 +91,34 @@ func runForeground(opts options) error {
 		case <-time.After(30 * time.Minute):
 			return err
 		}
+	}
+}
+
+func startHeadlessDeviceRuntime(ctx context.Context, opts options) (<-chan struct{}, error) {
+	state, err := loadState(opts.home)
+	if err != nil {
+		return nil, fmt.Errorf("load installation identity for device runtime: %w", err)
+	}
+	device, err := newDeviceRuntime(state, newDesktopBridgeWithState(opts.home, nil, state))
+	if err != nil {
+		return nil, fmt.Errorf("initialize headless device runtime: %w", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		device.Run(ctx)
+	}()
+	return done, nil
+}
+
+func waitForDeviceRuntime(done <-chan struct{}, timeout time.Duration) {
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		fmt.Fprintln(os.Stderr, "[device-runtime] timed out while releasing browser sessions")
 	}
 }
 
@@ -89,7 +155,7 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 		tracker.fail("database", err)
 		return err
 	}
-	tracker.complete("database", fmt.Sprintf("PostgreSQL is ready on port %d", defaultDatabasePort))
+	tracker.complete("database", fmt.Sprintf("PostgreSQL is ready on port %d", databasePort()))
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer stopCancel()
@@ -97,13 +163,13 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 			fmt.Fprintln(os.Stderr, "[postgres]", err)
 		}
 	}()
-	fmt.Printf("[postgres] ready at 127.0.0.1:%d/%s\n", defaultDatabasePort, defaultDatabaseName)
+	fmt.Printf("[postgres] ready at 127.0.0.1:%d/%s\n", databasePort(), defaultDatabaseName)
 
 	paths, err := writeGeneratedConfigs(opts.home, state, executables)
 	if err != nil {
 		return err
 	}
-	supervisor := newSupervisor(opts.home, paths, manifest, executables, tracker, state.BrowserEncryptionKey, state.InternalServiceToken)
+	supervisor := newSupervisor(opts.home, paths, manifest, executables, tracker, state.BrowserDataDir, state.BrowserEncryptionKey, state.InternalServiceToken, state.BootstrapAdminPassword)
 	if err := supervisor.StartAll(ctx); err != nil {
 		return err
 	}

@@ -19,21 +19,23 @@ const (
 )
 
 type State struct {
-	LauncherPID          int               `json:"launcher_pid,omitempty"`
-	ManifestSource       string            `json:"manifest_source,omitempty"`
-	Version              string            `json:"version,omitempty"`
-	ConnectionMode       string            `json:"connection_mode,omitempty"`
-	DeploymentConfigured bool              `json:"deployment_configured,omitempty"`
-	RemoteClientURL      string            `json:"remote_client_url,omitempty"`
-	RemoteDeviceToken    string            `json:"remote_device_token,omitempty"`
-	DBPassword           string            `json:"db_password"`
-	BrowserEncryptionKey string            `json:"browser_encryption_key"`
-	BackupEncryptionKey  string            `json:"backup_encryption_key"`
-	BrowserAuthMode      string            `json:"browser_auth_mode,omitempty"`
-	BrowserProfile       string            `json:"browser_profile,omitempty"`
-	InternalServiceToken string            `json:"internal_service_token"`
-	DeviceID             string            `json:"device_id"`
-	Installed            map[string]string `json:"installed,omitempty"`
+	LauncherPID            int               `json:"launcher_pid,omitempty"`
+	ManifestSource         string            `json:"manifest_source,omitempty"`
+	Version                string            `json:"version,omitempty"`
+	ConnectionMode         string            `json:"connection_mode,omitempty"`
+	DeploymentConfigured   bool              `json:"deployment_configured,omitempty"`
+	RemoteClientURL        string            `json:"remote_client_url,omitempty"`
+	RemoteDeviceToken      string            `json:"remote_device_token,omitempty"`
+	DBPassword             string            `json:"db_password"`
+	BrowserEncryptionKey   string            `json:"browser_encryption_key"`
+	BrowserDataDir         string            `json:"browser_data_dir"`
+	BackupEncryptionKey    string            `json:"backup_encryption_key"`
+	BrowserAuthMode        string            `json:"browser_auth_mode,omitempty"`
+	BrowserProfile         string            `json:"browser_profile,omitempty"`
+	InternalServiceToken   string            `json:"internal_service_token"`
+	BootstrapAdminPassword string            `json:"-"`
+	DeviceID               string            `json:"device_id"`
+	Installed              map[string]string `json:"installed,omitempty"`
 }
 
 func Load(home string) (*State, error) {
@@ -57,7 +59,19 @@ func Load(home string) (*State, error) {
 	if value.Installed == nil {
 		value.Installed = make(map[string]string)
 	}
+	if strings.TrimSpace(value.BrowserDataDir) != "" {
+		value.BrowserDataDir, err = resolveBrowserDataDir(value.BrowserDataDir)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var reconcileErr error
+	value.BrowserDataDir, reconcileErr = reconcileSecret(home, "browser-data.path", value.BrowserDataDir, func() (string, error) {
+		return resolveBrowserDataDir("")
+	})
+	if reconcileErr != nil {
+		return nil, reconcileErr
+	}
 	value.DBPassword, reconcileErr = reconcileSecret(home, "database-password", value.DBPassword, func() (string, error) {
 		return randomSecret(24, "database password")
 	})
@@ -82,6 +96,12 @@ func Load(home string) (*State, error) {
 	if reconcileErr != nil {
 		return nil, reconcileErr
 	}
+	value.BootstrapAdminPassword, reconcileErr = reconcileSecret(home, "bootstrap-admin.password", value.BootstrapAdminPassword, func() (string, error) {
+		return randomSecret(24, "bootstrap administrator password")
+	})
+	if reconcileErr != nil {
+		return nil, reconcileErr
+	}
 	value.DeviceID, reconcileErr = reconcileSecret(home, "device-id", value.DeviceID, func() (string, error) {
 		secret, err := randomSecret(16, "device id")
 		return "device-" + secret, err
@@ -90,6 +110,30 @@ func Load(home string) (*State, error) {
 		return nil, reconcileErr
 	}
 	return value, nil
+}
+
+func resolveBrowserDataDir(current string) (string, error) {
+	current = strings.TrimSpace(current)
+	if current == "" {
+		for _, key := range []string{"ATHENA_AGENT_BROWSER_HOME", "AGENT_BROWSER_HOME"} {
+			if candidate := strings.TrimSpace(os.Getenv(key)); candidate != "" {
+				current = candidate
+				break
+			}
+		}
+	}
+	if current == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve agent-browser data directory: %w", err)
+		}
+		current = filepath.Join(home, ".agent-browser")
+	}
+	absolute, err := filepath.Abs(current)
+	if err != nil {
+		return "", fmt.Errorf("resolve agent-browser data directory %q: %w", current, err)
+	}
+	return filepath.Clean(absolute), nil
 }
 
 func reconcileSecret(home, name, current string, generate func() (string, error)) (string, error) {

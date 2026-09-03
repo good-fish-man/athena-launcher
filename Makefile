@@ -31,7 +31,10 @@ desktop-app: desktop
 	BINARY="$(abspath $(DIST)/athena-launcher-desktop)" VERSION="$(VERSION)" APP_DIR="$(abspath $(DIST)/Athena.app)" ./packaging/macos/package-app.sh
 
 desktop-run: frontend desktop-app
-	open -W "$(abspath $(DIST)/Athena.app)" --args --frontend-dir "$(abspath $(FRONTEND_PROJECT)/dist)"
+	@if [ -x "$(abspath $(DIST)/Athena.app/Contents/MacOS/athena-launcher)" ]; then \
+		"$(abspath $(DIST)/Athena.app/Contents/MacOS/athena-launcher)" stop >/dev/null 2>&1 || true; \
+	fi
+	open -n -W "$(abspath $(DIST)/Athena.app)" --args --frontend-dir "$(abspath $(FRONTEND_PROJECT)/dist)"
 else
 desktop-app: desktop
 

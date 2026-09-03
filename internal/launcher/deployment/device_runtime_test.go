@@ -11,6 +11,36 @@ import (
 	"time"
 )
 
+type shutdownRecordingBrowserController struct {
+	shutdownCalls int
+}
+
+func (b *shutdownRecordingBrowserController) RunAction(context.Context, browser_runtime.Request) (map[string]any, error) {
+	return nil, nil
+}
+
+func (b *shutdownRecordingBrowserController) RunTask(context.Context, browser_runtime.TaskRequest) (map[string]any, error) {
+	return nil, nil
+}
+
+func (b *shutdownRecordingBrowserController) ManageAutomation(context.Context, browser_runtime.AutomationRequest) (map[string]any, error) {
+	return nil, nil
+}
+
+func (b *shutdownRecordingBrowserController) Shutdown(context.Context) error {
+	b.shutdownCalls++
+	return nil
+}
+
+func (b *shutdownRecordingBrowserController) ResolveSession(string, bool, bool, string) (string, error) {
+	return "", nil
+}
+
+func (b *shutdownRecordingBrowserController) CloseSession(string)         {}
+func (b *shutdownRecordingBrowserController) SessionArgs(string) []string { return nil }
+func (b *shutdownRecordingBrowserController) Capabilities() []string      { return nil }
+func (b *shutdownRecordingBrowserController) Available() bool             { return true }
+
 func TestDeviceWebSocketURL(t *testing.T) {
 	for _, test := range []struct {
 		selection deploymentSelection
@@ -23,6 +53,18 @@ func TestDeviceWebSocketURL(t *testing.T) {
 		if err != nil || got != test.want {
 			t.Fatalf("deviceWebSocketURL() = %q, %v; want %q", got, err, test.want)
 		}
+	}
+}
+
+func TestDeviceRuntimeReleasesBrowserWhenItsContextEnds(t *testing.T) {
+	controller := &shutdownRecordingBrowserController{}
+	bridge := &desktopBridge{browser: controller}
+	runtime := &deviceRuntime{bridge: bridge}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	runtime.Run(ctx)
+	if controller.shutdownCalls != 1 {
+		t.Fatalf("browser shutdown calls = %d, want 1", controller.shutdownCalls)
 	}
 }
 
@@ -116,6 +158,10 @@ func TestDeviceRuntimeDeduplicatesBlockedAction(t *testing.T) {
 	second := runtime.execute(context.Background(), action, nil)
 	if first.Status != "BLOCKED" || second.Status != first.Status || second.Error != first.Error {
 		t.Fatalf("observations were not deduplicated: first=%+v second=%+v", first, second)
+	}
+	remembered := runtime.completed[action.IdempotencyKey]
+	if remembered.FinishedAt.IsZero() || remembered.ObservedAt.IsZero() {
+		t.Fatalf("durable observation is missing completion timestamps: %+v", remembered)
 	}
 }
 
@@ -319,21 +365,23 @@ func TestDesktopBridgeReusesActiveBrowserSession(t *testing.T) {
 	}
 }
 
-func TestDesktopBridgeReusesOneBrowserSessionForDifferentTargets(t *testing.T) {
+func TestDesktopBridgePreservesExplicitBrowserSessionForDifferentTargets(t *testing.T) {
 	bridge := newDesktopBridge(t.TempDir(), nil)
-	youtube, err := bridge.browserSession("server-random-1", true, false, "YouTube")
+	const youtubeID = "athena-11111111111111111111111111111111"
+	const qqMusicID = "athena-22222222222222222222222222222222"
+	youtube, err := bridge.browserSession(youtubeID, true, false, "YouTube")
 	if err != nil {
 		t.Fatal(err)
 	}
-	qqMusic, err := bridge.browserSession("server-random-2", true, false, "QQ Music")
+	qqMusic, err := bridge.browserSession(qqMusicID, true, false, "QQ Music")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if youtube != qqMusic {
-		t.Fatalf("different browser targets should share one browser session: youtube=%q qq=%q", youtube, qqMusic)
+	if youtube != youtubeID || qqMusic != qqMusicID {
+		t.Fatalf("explicit browser sessions were not preserved: youtube=%q qq=%q", youtube, qqMusic)
 	}
-	if !browser_runtime.IsValidSessionID(youtube) {
-		t.Fatalf("shared target session must be a valid Athena browser ID: %q", youtube)
+	if !browser_runtime.IsValidSessionID(youtube) || !browser_runtime.IsValidSessionID(qqMusic) {
+		t.Fatalf("explicit target sessions must be valid Athena browser IDs: youtube=%q qq=%q", youtube, qqMusic)
 	}
 }
 

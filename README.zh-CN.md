@@ -102,14 +102,13 @@ chmod +x Athena_<version>_linux_x86_64.AppImage
 
 ### 首次登录
 
-Agent Runtime Client 只会在数据库中不存在 `athena` 账号时创建初始管理员：
+Agent Runtime Client 只会在数据库中不存在 `athena` 账号时创建初始管理员。Launcher 会为每个安装生成不同的随机密码，不会把密码编译进二进制、Manifest 或生成的 YAML。密码保存在：
 
 ```text
-账号：athena
-密码：athena
+~/.athena/secrets/bootstrap-admin.password
 ```
 
-重启 Athena 不会重复创建账号，也不会把已修改的密码重置为 `athena`。该凭据只用于可信本机环境中的首次使用；向其他机器开放 Athena 前必须替换默认密码。
+该文件仅允许当前用户读取。重启 Athena 不会重复创建账号，也不会重置、激活或提权已有同名账号。首次登录后请修改生成的密码，并且不要发布 `secrets` 目录内容。
 
 ## 启动中心与日志
 
@@ -198,6 +197,8 @@ make desktop
 make desktop-run
 ```
 
+源码中固定了官方 Release 的 Ed25519 公钥，因此针对默认官方 Manifest 运行 `go run ./cmd/athena-launcher validate`、`make build` 或 `make desktop-run` 时无需设置 `ATHENA_RELEASE_PUBLIC_KEY`。Launcher 不会在运行时下载公钥，因为从 Manifest 相同位置同时下载公钥不能建立独立信任。使用 `development: true` 的本地 Manifest 会跳过 Release 签名，但仍执行结构、平台、Hash 和安全路径校验；`ATHENA_RELEASE_PUBLIC_KEY` 只用于本地签名 Manifest 的发布流水线或集成测试。公网生产 Manifest 始终使用编译进二进制的公钥。
+
 `make build` 生成保留浏览器界面的无界面/CLI 版本；`make desktop` 编译启用开发者工具的本地 Wails 桌面外壳。测试本地前端时使用 `make desktop-run`：它会先在相邻的 `frontend/agent-ui` 项目执行 `npm run build`，再让 Athena 直接加载该项目的 `dist`。按 `F12` 打开 WebView 检查器，Mac 紧凑键盘可能需要按 `Fn+F12`。macOS 上还会生成带麦克风、语音识别和定位权限声明的 `dist/Athena.app`，确保系统能够正常弹出授权。开发模式会跳过已下载前端包及前端更新提示，后端服务仍由 Manifest 管理；正式 Release 工作流不会包含 `devtools` 标签。如果仓库不是默认相邻目录结构，可传入 `FRONTEND_PROJECT=/path/to/agent-ui`，也可直接使用 `--frontend-dir /absolute/path/to/dist`。Linux 请先安装 `build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev`，并在发行构建中使用 `webkit2_41` 标签。
 
 构建全部平台单文件：
@@ -251,7 +252,8 @@ GitHub Token 默认只能操作当前仓库，因此其他三个仓库的 Releas
 
 - 托管 PostgreSQL 只监听 `127.0.0.1:15432`。
 - 随机数据库密码保存在权限为 `0600` 的配置/状态文件中。
-- agent-browser Vault 加密密钥只生成一次并保存在权限为 `0600` 的 Launcher 状态文件中，服务和安装包更新后继续复用。
+- agent-browser Vault 加密密钥只生成一次并保存在权限为 `0600` 的 Launcher 状态文件与恢复密钥文件中，服务和安装包更新后继续复用。
+- agent-browser 数据目录会作为绝对路径保存在 Launcher 状态与受保护的恢复文件中；已有安装继续使用原来的 `~/.agent-browser`。Launcher 自身和所有托管服务会同时收到一致的 `AGENT_BROWSER_HOME`、`ATHENA_AGENT_BROWSER_HOME` 与 Vault 密钥，因此版本化可执行文件更新不会切换凭据或会话目录。首次保存前可通过上述任一 Home 环境变量选择自定义目录；后续如需临时覆盖，必须保证所有相关进程使用同一个目录。
 - 独立随机的内部服务令牌用于验证 Runtime 向 Client 创建定时任务的请求。
 - 稳定的本地 Ed25519 密钥用于签署私有 Capability Provider，Runtime 信任库只保存公钥。
 - Provider 包不可变，Runtime 只能获得 Registry 审批后的权限与资源子集。

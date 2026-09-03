@@ -10,7 +10,7 @@ Athena v0.9 使用失败关闭的发布链路：
 6. Launcher 在安装前验证 Manifest 签名/时效、SBOM Hash、Artifact Hash/签名、平台代码签名和升级下限。
 7. 本地更新在停止旧服务前创建 PostgreSQL 加密备份。
 
-远程 Manifest 不允许开启开发模式。生产 Manifest 没有配置公钥时会被拒绝。已经安装且此前验证通过的版本可在 Manifest 过期后继续运行，但不能用过期 Manifest 下载新产物。
+远程 Manifest 不允许开启开发模式。生产 Manifest 没有配置公钥时会被拒绝。源码构建固定官方 Release 公钥，正式构建可在编译时替换该值；空的构建参数不会清除源码默认值。Launcher 不会从 Manifest 相同的远程位置自动下载公钥，否则攻击者可以同时替换 Manifest 和公钥。`ATHENA_RELEASE_PUBLIC_KEY` 仅可覆盖本地签名 Manifest 的校验，用于发布流水线和集成测试，不能替换公网 Manifest 的编译期信任根。已经安装且此前验证通过的版本可在 Manifest 过期后继续运行，但不能用过期 Manifest 下载新产物。
 
 macOS 需要有效 Developer ID 签名和公证证据；Windows 需要 Authenticode；Linux 包必须提供发行版、GPG、Cosign 或其他白名单包签名。任一平台缺少签名证据时生产发布都会失败关闭，不提供 unsigned emergency override。恢复发布只能重新生成正确签名的产物和 Manifest，不能降低校验强度。
 

@@ -52,20 +52,58 @@ func (e *httpStatusError) Error() string {
 }
 
 func loadManifest(ctx context.Context, source string) (*Manifest, error) {
-	data, err := readSource(ctx, source, manifestSizeLimit)
-	if err != nil {
-		archiveSource, ok := manifestArchiveFallback(source, err)
-		if ok {
-			data, err = readSource(ctx, archiveSource, manifestSizeLimit)
-			if err != nil {
-				return nil, fmt.Errorf("load release manifest %s (archive fallback %s): %w", source, archiveSource, err)
-			}
-		}
-	}
+	data, effectiveSource, err := readManifestSource(ctx, source)
 	if err != nil {
 		return nil, fmt.Errorf("load release manifest %s: %w", source, err)
 	}
-	data, err = unpackManifest(data, manifestSizeLimit)
+	manifest, err := decodeManifestData(data, effectiveSource)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateLoadedManifest(ctx, effectiveSource, manifest); err != nil {
+		if errors.Is(err, releasepkg.ErrManifestIdentityRequired) {
+			archiveSource, ok := manifestArchiveSibling(source)
+			if ok && archiveSource != effectiveSource {
+				archiveData, readErr := readSource(ctx, archiveSource, manifestSizeLimit)
+				if readErr == nil {
+					archiveManifest, decodeErr := decodeManifestData(archiveData, archiveSource)
+					if decodeErr == nil {
+						if validateErr := validateLoadedManifest(ctx, archiveSource, archiveManifest); validateErr == nil {
+							return archiveManifest, nil
+						} else {
+							readErr = validateErr
+						}
+					} else {
+						readErr = decodeErr
+					}
+				}
+				return nil, legacyManifestError(source, archiveSource, readErr)
+			}
+			return nil, legacyManifestError(source, "", err)
+		}
+		return nil, err
+	}
+	return manifest, nil
+}
+
+func readManifestSource(ctx context.Context, source string) ([]byte, string, error) {
+	data, err := readSource(ctx, source, manifestSizeLimit)
+	if err == nil {
+		return data, source, nil
+	}
+	archiveSource, ok := manifestArchiveFallback(source, err)
+	if !ok {
+		return nil, source, err
+	}
+	data, err = readSource(ctx, archiveSource, manifestSizeLimit)
+	if err != nil {
+		return nil, archiveSource, fmt.Errorf("archive fallback %s: %w", archiveSource, err)
+	}
+	return data, archiveSource, nil
+}
+
+func decodeManifestData(data []byte, source string) (*Manifest, error) {
+	data, err := unpackManifest(data, manifestSizeLimit)
 	if err != nil {
 		return nil, fmt.Errorf("decode release manifest %s: %w", source, err)
 	}
@@ -73,36 +111,40 @@ func loadManifest(ctx context.Context, source string) (*Manifest, error) {
 	if err := decodeStrictJSON(data, &manifest); err != nil {
 		return nil, fmt.Errorf("parse release manifest: %w", err)
 	}
+	return &manifest, nil
+}
+
+func validateLoadedManifest(ctx context.Context, source string, manifest *Manifest) error {
 	if err := manifest.Validate(platformKey()); err != nil {
-		return nil, err
+		return err
 	}
 	if err := manifest.ValidateGA(); err != nil {
-		return nil, err
+		return err
 	}
 	remote := remoteManifestSource(source)
 	if remote && manifest.Development {
-		return nil, fmt.Errorf("remote release manifest cannot use development mode")
+		return fmt.Errorf("remote release manifest cannot use development mode")
 	}
 	if !manifest.Development {
-		publicKey, err := configuredReleasePublicKey()
+		publicKey, err := releasePublicKeyForSource(source)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if err := manifest.Verify(publicKey, time.Now().UTC()); err != nil {
-			return nil, fmt.Errorf("verify release manifest: %w", err)
+			return fmt.Errorf("verify release manifest: %w", err)
 		}
 		if remote {
-			if err := verifyReleaseSBOM(ctx, &manifest); err != nil {
-				return nil, err
+			if err := verifyReleaseSBOM(ctx, manifest); err != nil {
+				return err
 			}
 			if compareReleaseSemver(manifest.Version, ga.ReleaseVersion) >= 0 {
-				if err := verifyReleaseCompatibility(ctx, &manifest); err != nil {
-					return nil, err
+				if err := verifyReleaseCompatibility(ctx, manifest); err != nil {
+					return err
 				}
 			}
 		}
 	}
-	return &manifest, nil
+	return nil
 }
 
 func verifyReleaseCompatibility(ctx context.Context, manifest *Manifest) error {
@@ -203,6 +245,18 @@ func configuredReleasePublicKey() (ed25519.PublicKey, error) {
 	return releasepkg.DecodePublicKey(value)
 }
 
+func releasePublicKeyForSource(source string) (ed25519.PublicKey, error) {
+	// A local signed manifest may use an explicit key for release-pipeline and
+	// integration testing. Remote manifests must use the key pinned in the
+	// binary; downloading a key beside the manifest would not establish trust.
+	if !remoteManifestSource(source) {
+		if value := strings.TrimSpace(os.Getenv("ATHENA_RELEASE_PUBLIC_KEY")); value != "" {
+			return releasepkg.DecodePublicKey(value)
+		}
+	}
+	return configuredReleasePublicKey()
+}
+
 func verifyReleaseSBOM(ctx context.Context, manifest *Manifest) error {
 	data, err := readSource(ctx, manifest.SBOMURL, 16<<20)
 	if err != nil {
@@ -280,12 +334,25 @@ func manifestArchiveFallback(source string, sourceErr error) (string, bool) {
 	if !errors.As(sourceErr, &statusErr) || statusErr.statusCode != http.StatusNotFound {
 		return "", false
 	}
+	return manifestArchiveSibling(source)
+}
+
+func manifestArchiveSibling(source string) (string, bool) {
 	parsed, err := url.Parse(source)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || path.Base(parsed.Path) != manifestFileName {
 		return "", false
 	}
 	parsed.Path = path.Join(path.Dir(parsed.Path), manifestArchiveName)
 	return parsed.String(), true
+}
+
+func legacyManifestError(source, archiveSource string, cause error) error {
+	message := fmt.Sprintf("release manifest %s uses the legacy manifest format; regenerate and re-upload %s and %s with %s so schema, release_id, and protocol_version are present",
+		source, manifestFileName, manifestArchiveName, ".github/workflows/publish-manifest.yml")
+	if archiveSource != "" && cause != nil {
+		message += fmt.Sprintf("; archive fallback %s also failed: %v", archiveSource, cause)
+	}
+	return fmt.Errorf("%s: %w", message, releasepkg.ErrManifestIdentityRequired)
 }
 
 func unpackManifest(data []byte, limit int64) ([]byte, error) {

@@ -19,37 +19,15 @@ func TestSupervisorReturnsUpdateRequestAfterApproval(t *testing.T) {
 	tracker.offerUpdate([]packageUpdate{{Component: "agent-runtime", DisplayName: "Agent Runtime", CurrentHash: "old", RemoteHash: "new"}}, true)
 	control := newStartupController()
 	control.applyUpdate <- struct{}{}
-	backupCalls := 0
-	supervisor := &supervisor{tracker: tracker, exits: make(chan processExit, 1), preUpdateBackup: func(context.Context) error {
-		backupCalls++
-		return nil
-	}}
+	supervisor := &supervisor{tracker: tracker, exits: make(chan processExit, 1)}
 
 	err := supervisor.Run(context.Background(), control, func() ([]packageUpdate, error) { return nil, nil })
 	if !errors.Is(err, errUpdateRequested) {
 		t.Fatalf("supervisor.Run() error = %v, want errUpdateRequested", err)
 	}
-	if backupCalls != 1 {
-		t.Fatalf("pre-update backup calls = %d, want 1", backupCalls)
-	}
-}
-
-func TestSupervisorKeepsRunningWhenPreUpdateBackupFails(t *testing.T) {
-	tracker := newStartupTracker(t.TempDir())
-	tracker.offerUpdate([]packageUpdate{{Component: "agent-runtime"}}, true)
-	control := newStartupController()
-	control.applyUpdate <- struct{}{}
-	ctx, cancel := context.WithCancel(context.Background())
-	supervisor := &supervisor{tracker: tracker, exits: make(chan processExit, 1), preUpdateBackup: func(context.Context) error {
-		cancel()
-		return errors.New("backup unavailable")
-	}}
-	if err := supervisor.Run(ctx, control, func() ([]packageUpdate, error) { return nil, nil }); err != nil {
-		t.Fatalf("supervisor.Run() error = %v", err)
-	}
 	update := tracker.current().Update
-	if update.State != "available" || !strings.Contains(update.Message, "backup unavailable") {
-		t.Fatalf("unexpected update state after backup failure: %+v", update)
+	if update.State != "applying" || !strings.Contains(update.Message, "encrypted recovery point") {
+		t.Fatalf("unexpected update protection state: %+v", update)
 	}
 }
 
@@ -242,7 +220,7 @@ func writeTestDatabaseBinaries(t *testing.T, root string) {
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
 	}
-	for _, name := range []string{"initdb", "pg_ctl", "postgres", "pg_dump", "pg_restore"} {
+	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
 		writeTestExecutable(t, filepath.Join(root, "bin", name+suffix))
 	}
 }

@@ -1,11 +1,21 @@
 package deployment
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"strings"
+	"testing"
 	"time"
 
 	releasepkg "athena-launcher/internal/release"
 )
+
+func useEmbeddedReleasePublicKey(t *testing.T, publicKey ed25519.PublicKey) {
+	t.Helper()
+	original := DefaultReleasePublicKey
+	DefaultReleasePublicKey = base64.RawStdEncoding.EncodeToString(publicKey)
+	t.Cleanup(func() { DefaultReleasePublicKey = original })
+}
 
 func completeDevelopmentManifest(manifest *Manifest) *Manifest {
 	if manifest == nil {

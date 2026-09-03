@@ -11,6 +11,9 @@ import (
 )
 
 func Run(args []string) error {
+	if err := validateRuntimeOverrides(); err != nil {
+		return err
+	}
 	command := defaultCommand()
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		command, args = args[0], args[1:]

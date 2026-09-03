@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -24,6 +25,8 @@ const (
 	ManifestSchema  = "athena.release-manifest.v1"
 	ProtocolVersion = ga.ProtocolVersion
 )
+
+var ErrManifestIdentityRequired = errors.New("manifest schema, release_id, and protocol_version are required")
 
 var semverPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 
@@ -94,7 +97,7 @@ func (m *Manifest) Validate(platform string) error {
 		return fmt.Errorf("manifest is required")
 	}
 	if m.Schema != ManifestSchema || strings.TrimSpace(m.ReleaseID) == "" || strings.TrimSpace(m.ProtocolVersion) == "" {
-		return fmt.Errorf("manifest schema, release_id, and protocol_version are required")
+		return ErrManifestIdentityRequired
 	}
 	if !semverPattern.MatchString(strings.TrimSpace(m.Version)) || !semverPattern.MatchString(strings.TrimSpace(m.MinimumFromVersion)) {
 		return fmt.Errorf("manifest version and minimum_from_version must use semantic versioning")
@@ -242,7 +245,7 @@ func (m *Manifest) ValidateGA() error {
 }
 
 func validateArtifact(artifact Artifact, executableRequired, development bool) error {
-	if err := validateHTTPSURL(artifact.URL); err != nil {
+	if err := validateArtifactURL(artifact.URL, development); err != nil {
 		return fmt.Errorf("url: %w", err)
 	}
 	if !validSHA256(artifact.SHA256) {
@@ -269,6 +272,30 @@ func validateArtifact(artifact Artifact, executableRequired, development bool) e
 	case "", "raw", "zip", "tar.gz", "tgz":
 	default:
 		return fmt.Errorf("unsupported format %q", artifact.Format)
+	}
+	return nil
+}
+
+func validateArtifactURL(value string, development bool) error {
+	if err := validateHTTPSURL(value); err == nil {
+		return nil
+	}
+	if !development {
+		return validateHTTPSURL(value)
+	}
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "file" || parsed.Host != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("development artifact must use HTTPS or an absolute local file URL")
+	}
+	localPath, err := url.PathUnescape(parsed.EscapedPath())
+	if err != nil {
+		return fmt.Errorf("decode local file path: %w", err)
+	}
+	if !filepath.IsAbs(localPath) || filepath.Clean(localPath) != localPath {
+		return fmt.Errorf("development artifact file path must be absolute and clean")
 	}
 	return nil
 }

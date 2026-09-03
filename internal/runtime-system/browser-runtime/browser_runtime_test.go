@@ -49,6 +49,41 @@ func TestBrowserAgentSessionActiveUsesSessionInfo(t *testing.T) {
 	}
 }
 
+func TestPrepareBrowserRefreshTargetRestoresPersistedPage(t *testing.T) {
+	const target = "https://example.com/"
+	opened := false
+	run := func(_ time.Duration, args ...string) (string, error) {
+		command := strings.Join(args, " ")
+		switch {
+		case strings.HasSuffix(command, "get url"):
+			if opened {
+				return target, nil
+			}
+			return "about:blank", nil
+		case strings.HasSuffix(command, "open "+target):
+			opened = true
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected browser command: %s", command)
+		}
+	}
+
+	got, restored, err := prepareBrowserRefreshTarget(run, []string{"--session", "athena-test"}, "about:blank", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored || !opened || got != target {
+		t.Fatalf("refresh target = %q, restored=%v, opened=%v", got, restored, opened)
+	}
+}
+
+func TestPrepareBrowserRefreshTargetRejectsBlankSession(t *testing.T) {
+	_, _, err := prepareBrowserRefreshTarget(nil, nil, "about:blank", "")
+	if err == nil || !strings.Contains(err.Error(), "no live browser page") {
+		t.Fatalf("expected unavailable current-page error, got %v", err)
+	}
+}
+
 func TestHeadedLaunchOnlyRestartsConfirmedLiveHeadlessSession(t *testing.T) {
 	tests := []struct {
 		name                                   string

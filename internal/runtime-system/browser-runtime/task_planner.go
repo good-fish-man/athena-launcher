@@ -34,6 +34,7 @@ func (browserTaskPlanner) Plan(request browserTaskRequest) browserTaskPlanningRe
 	signals := map[string]bool{
 		"continue_session": strings.TrimSpace(request.SessionID) != "",
 		"media_control":    strings.TrimSpace(task.MediaControl) != "",
+		"page_control":     strings.TrimSpace(task.PageControl) != "",
 		"search":           strings.TrimSpace(task.Query) != "",
 		"select":           strings.TrimSpace(task.Selection) != "",
 		"open_result":      task.ResultOrdinal > 0 || task.OpenFirstResult,
@@ -44,6 +45,8 @@ func (browserTaskPlanner) Plan(request browserTaskRequest) browserTaskPlanningRe
 	switch {
 	case task.MediaControl != "":
 		strategy = "control_current_media"
+	case task.PageControl != "":
+		strategy = "control_current_page"
 	case task.Selection != "":
 		strategy = "select_current_page"
 	case task.Target == "" && request.SessionID != "":

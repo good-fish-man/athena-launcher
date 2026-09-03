@@ -24,6 +24,7 @@ type browserTaskRequest struct {
 	Target               string
 	Query                string
 	ContextualMediaTitle bool
+	SemanticTrace        map[string]any
 	Progress             func(browserActionProgress)
 	Budget               *browserTaskExecutionBudget
 	Trace                *browserInteractionTrace
@@ -48,6 +49,7 @@ type browserTaskPlan struct {
 	Message              string                     `json:"message,omitempty"`
 	budget               *browserTaskExecutionBudget
 	trace                *browserInteractionTrace
+	effectTrace          *browserEffectTrace
 }
 
 type browserSemanticElement struct {
@@ -64,6 +66,13 @@ func (b *browserController) runTask(ctx context.Context, request browserTaskRequ
 		return nil, fmt.Errorf("browser task goal is required")
 	}
 	plan := browserTaskPlan{Goal: goal, Target: strings.TrimSpace(request.Target), Query: strings.TrimSpace(request.Query)}
+	if request.SemanticTrace != nil {
+		trace, err := newBrowserEffectTrace(request.SemanticTrace, request.RequestID, request.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("decode browser effect trace: %w", err)
+		}
+		plan.effectTrace = trace
+	}
 	if b.taskPlanner == nil {
 		b.taskPlanner = newBrowserTaskPlanner()
 	}
@@ -77,6 +86,19 @@ func (b *browserController) runTask(ctx context.Context, request browserTaskRequ
 	plan.Intent, plan.Target, plan.Query = task.Intent, task.Target, task.Query
 	if request.Progress != nil {
 		request.Progress(browserActionProgress{Stage: "planning", Progress: 5, Message: "Planning browser task", State: map[string]any{"goal": goal, "target": plan.Target, "query": plan.Query}})
+	}
+	if task.PageControl != "" {
+		if strings.TrimSpace(request.SessionID) == "" {
+			return b.finishTask(nil, plan, fmt.Errorf("no active browser session is available for the current page"))
+		}
+		plan.Steps = append(plan.Steps, task.PageControl+"_current_page")
+		state, err := b.runTaskAction(ctx, request, task.PageControl, map[string]any{"snapshot": true}, "Refreshing current browser page", 85)
+		if err != nil || browserInterventionRequired(state) {
+			return b.finishTask(state, plan, err)
+		}
+		plan.Completed = true
+		plan.Message = "Current browser page refreshed."
+		return b.finishTask(state, plan, nil)
 	}
 	if task.MediaControl != "" {
 		if strings.TrimSpace(request.SessionID) == "" {
@@ -298,6 +320,7 @@ type inferredBrowserTask struct {
 	Selection            string
 	GroundingQuery       string
 	MediaControl         string
+	PageControl          string
 	OpenFirstResult      bool
 	ResultOrdinal        int
 	PlayResult           bool
@@ -385,6 +408,13 @@ func inferBrowserTask(goal, target, query string) inferredBrowserTask {
 		result.Query = ""
 		return result
 	}
+	if browserGoalRequestsCurrentPageRefresh(lowerGoal) {
+		result.Intent = "refresh_current_page"
+		result.PageControl = "refresh"
+		result.Target = ""
+		result.Query = ""
+		return result
+	}
 	if selection, grounding := inferCurrentPageSelectionIntent(goal); selection != "" {
 		result.Intent = "select_current"
 		result.Selection = selection
@@ -442,6 +472,16 @@ func inferBrowserTask(goal, target, query string) inferredBrowserTask {
 		result.Target = goal
 	}
 	return result
+}
+
+func browserGoalRequestsCurrentPageRefresh(goal string) bool {
+	return containsBrowserPhrase(strings.ToLower(strings.TrimSpace(goal)), []string{
+		"refresh current page", "refresh the current page", "refresh this page",
+		"refresh current browser page", "refresh the current browser page", "refresh this browser page",
+		"reload current page", "reload the current page", "reload this page",
+		"reload current browser page", "reload the current browser page", "reload this browser page",
+		"刷新当前页面", "刷新这个页面", "刷新此页面", "重新加载当前页面", "重新加载这个页面",
+	})
 }
 
 func inferCurrentMediaControl(goal string) string {
@@ -1443,6 +1483,9 @@ func (b *browserController) finishTask(state map[string]any, plan browserTaskPla
 	}
 	plan.ExecutionBudget = plan.budget.snapshot()
 	plan.Interactions = plan.trace.snapshot()
+	if plan.effectTrace != nil {
+		err = plan.effectTrace.finish(state, &plan, err)
+	}
 	state["browser_task"] = plan
 	return state, err
 }

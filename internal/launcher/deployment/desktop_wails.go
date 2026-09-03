@@ -26,13 +26,14 @@ type desktopApplication struct {
 	retry   chan struct{}
 	assets  *desktopAssetSwitch
 
-	mu     sync.Mutex
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	update string
-	device *deviceRuntime
-	bridge *desktopBridge
+	mu         sync.Mutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
+	deviceDone chan struct{}
+	update     string
+	device     *deviceRuntime
+	bridge     *desktopBridge
 }
 
 func launchDesktop(opts options) error {
@@ -71,7 +72,7 @@ func launchDesktop(opts options) error {
 		assets:  assets,
 		done:    make(chan struct{}),
 	}
-	bridge := newDesktopBridge(opts.home, func() (string, error) {
+	bridge := newDesktopBridgeWithState(opts.home, func() (string, error) {
 		app.mu.Lock()
 		ctx := app.ctx
 		app.mu.Unlock()
@@ -79,7 +80,7 @@ func launchDesktop(opts options) error {
 			return "", fmt.Errorf("desktop window is not ready")
 		}
 		return wailsruntime.OpenDirectoryDialog(ctx, wailsruntime.OpenDialogOptions{Title: "Authorize a folder for Athena"})
-	})
+	}, state)
 	assets.SetDesktopBridge(bridge)
 	app.bridge = bridge
 	tracker.listen(app.handleSnapshot)
@@ -120,7 +121,7 @@ func (a *desktopApplication) run(ctx context.Context) {
 	defer close(a.done)
 	stopPath := filepath.Join(a.opts.home, "stop.request")
 	_ = os.Remove(stopPath)
-	go watchStopRequest(ctx, func() { a.cancelServices() }, stopPath)
+	go watchStopRequest(ctx, a.requestShutdown, stopPath)
 	select {
 	case <-ctx.Done():
 		return
@@ -180,8 +181,13 @@ func (a *desktopApplication) startDeviceRuntime(ctx context.Context) {
 		return
 	}
 	a.device = device
+	a.deviceDone = make(chan struct{})
+	deviceDone := a.deviceDone
 	a.mu.Unlock()
-	go device.Run(ctx)
+	go func() {
+		defer close(deviceDone)
+		device.Run(ctx)
+	}()
 }
 
 func (a *desktopApplication) shutdown(context.Context) {
@@ -191,6 +197,10 @@ func (a *desktopApplication) shutdown(context.Context) {
 	case <-time.After(50 * time.Second):
 		fmt.Fprintln(os.Stderr, "[desktop] timed out while stopping managed services")
 	}
+	a.mu.Lock()
+	deviceDone := a.deviceDone
+	a.mu.Unlock()
+	waitForDeviceRuntime(deviceDone, 20*time.Second)
 }
 
 func (a *desktopApplication) cancelServices() {
@@ -199,6 +209,16 @@ func (a *desktopApplication) cancelServices() {
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+}
+
+func (a *desktopApplication) requestShutdown() {
+	a.cancelServices()
+	a.mu.Lock()
+	ctx := a.ctx
+	a.mu.Unlock()
+	if ctx != nil {
+		wailsruntime.Quit(ctx)
 	}
 }
 

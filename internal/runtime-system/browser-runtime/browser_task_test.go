@@ -142,6 +142,13 @@ func TestInferBrowserTaskControlsCurrentMedia(t *testing.T) {
 	}
 }
 
+func TestInferBrowserTaskRefreshesCurrentPageWithoutSearchHandoff(t *testing.T) {
+	task := inferBrowserTask("Please refresh the current browser page", "", "")
+	if task.PageControl != "refresh" || task.Intent != "refresh_current_page" || task.Target != "" || task.Query != "" {
+		t.Fatalf("current-page refresh was not preserved as a direct control: %+v", task)
+	}
+}
+
 func TestInferBrowserTaskOpensSecondYouTubeHomeVideo(t *testing.T) {
 	task := inferBrowserTask("Open youtub home page and play the second vido", "", "the 2nd video in the homepage feed and click it to start playback")
 	if !isYouTubeName(task.Target) {

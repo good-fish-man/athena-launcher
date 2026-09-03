@@ -62,7 +62,15 @@ type desktopFileMatch struct {
 }
 
 func newDesktopBridge(home string, selectFolder func() (string, error)) *desktopBridge {
-	bridge := &desktopBridge{home: home, selectFolder: selectFolder, browser: browser_runtime.NewController(home), rootsPath: filepath.Join(home, "data", "authorized-roots.json")}
+	return newDesktopBridgeWithState(home, selectFolder, nil)
+}
+
+func newDesktopBridgeWithState(home string, selectFolder func() (string, error), state *launcherState) *desktopBridge {
+	browser := browser_runtime.NewController(home)
+	if state != nil {
+		browser = browser_runtime.NewControllerWithPersistence(home, state.BrowserDataDir, state.BrowserEncryptionKey)
+	}
+	bridge := &desktopBridge{home: home, selectFolder: selectFolder, browser: browser, rootsPath: filepath.Join(home, "data", "authorized-roots.json")}
 	if data, err := os.ReadFile(bridge.rootsPath); err == nil {
 		var roots []string
 		if json.Unmarshal(data, &roots) == nil {
@@ -145,6 +153,17 @@ func (b *desktopBridge) clearBrowserSession(sessionID string) {
 	if sessionID == "" || b.activeBrowserSession == sessionID {
 		b.activeBrowserSession = ""
 	}
+}
+
+func (b *desktopBridge) shutdownBrowser(ctx context.Context) error {
+	b.browserMu.Lock()
+	controller := b.browser
+	b.activeBrowserSession = ""
+	b.browserMu.Unlock()
+	if controller == nil {
+		return nil
+	}
+	return controller.Shutdown(ctx)
 }
 
 func writeDesktopError(w http.ResponseWriter, status int, message string) {

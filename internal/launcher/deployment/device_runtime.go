@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	semantics "github.com/good-fish-man/athena-protocol/draft/v0alpha"
 	log "github.com/good-fish-man/logx"
 	"golang.org/x/net/websocket"
 )
@@ -125,11 +126,15 @@ func deviceWebSocketURLs(selection deploymentSelection) ([]string, error) {
 }
 
 func (d *deviceRuntime) Run(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	defer d.shutdownBrowser(context.WithoutCancel(ctx))
 	delay := time.Second
 	for ctx.Err() == nil {
 		connectedAt := time.Now()
 		if err := d.connect(ctx); err != nil && ctx.Err() == nil {
-			fmt.Printf("[device-runtime] connection failed: %v\n", err)
+			log.Warnf(ctx, "[device-runtime] connection failed: %v", err)
 		}
 		if time.Since(connectedAt) >= 30*time.Second {
 			delay = time.Second
@@ -142,6 +147,17 @@ func (d *deviceRuntime) Run(ctx context.Context) {
 		if delay < 30*time.Second {
 			delay *= 2
 		}
+	}
+}
+
+func (d *deviceRuntime) shutdownBrowser(parent context.Context) {
+	if d == nil || d.bridge == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	if err := d.bridge.shutdownBrowser(ctx); err != nil {
+		log.Warnf(ctx, "[device-runtime] browser shutdown failed: %v", err)
 	}
 }
 
@@ -361,11 +377,11 @@ func (d *deviceRuntime) runAction(parent context.Context, writer *deviceWriter, 
 		progress.LeaseOwner = action.LeaseOwner
 		progress.FencingToken = action.FencingToken
 		if err := writer.Send(progress); err != nil && parent.Err() == nil {
-			fmt.Printf("[device-runtime] send progress %s: %v\n", action.ActionID, err)
+			log.Errorf(ctx, "[device-runtime] send progress %s: %v", action.ActionID, err)
 		}
 	})
 	if err := writer.Send(observation); err != nil && parent.Err() == nil {
-		fmt.Printf("[device-runtime] send observation %s: %v\n", action.ActionID, err)
+		log.Errorf(ctx, "[device-runtime] send observation %s: %v", action.ActionID, err)
 	}
 }
 
@@ -405,9 +421,15 @@ func (d *deviceRuntime) capabilityInstances() []map[string]any {
 			"instance_id": d.capabilityInstanceID(capability),
 			"capability":  capability,
 			"version":     "0.2",
+			"operations":  []string{capabilityOperation(capability)},
 		})
 	}
 	return instances
+}
+
+func capabilityOperation(capability string) string {
+	parts := strings.Split(strings.TrimSpace(capability), ".")
+	return parts[len(parts)-1]
 }
 
 func (d *deviceRuntime) capabilityInstanceID(capability string) string {
@@ -634,6 +656,7 @@ func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceActi
 		result, err := d.bridge.browser.RunTask(ctx, browser_runtime.TaskRequest{
 			RequestID: action.ActionID, SessionID: sessionID, Goal: value("goal"), Target: value("target"), Query: value("query"),
 			ContextualMediaTitle: boolArgument(arguments["contextual_media_title"]),
+			SemanticTrace:        semanticTraceArgument(arguments[semantics.MetadataKey]),
 			Progress: func(update browser_runtime.Progress) {
 				if progress == nil {
 					return
@@ -715,7 +738,7 @@ func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceActi
 				})
 			},
 		})
-		if action.Capability == "browser.close" && err == nil {
+		if action.Capability == "browser.close" && err == nil && strings.TrimSpace(value("tab_id")) == "" {
 			d.bridge.clearBrowserSession(sessionID)
 		}
 		return result, sessionID, err
@@ -779,6 +802,11 @@ func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceActi
 	default:
 		return nil, action.SessionID, fmt.Errorf("unsupported capability %q", action.Capability)
 	}
+}
+
+func semanticTraceArgument(value any) map[string]any {
+	trace, _ := value.(map[string]any)
+	return trace
 }
 
 func browserSessionTargetKey(arguments map[string]any) string {

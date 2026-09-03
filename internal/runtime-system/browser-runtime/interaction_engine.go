@@ -150,7 +150,8 @@ func (b *browserController) runTaskAction(
 				Message: "Retrying a reversible browser action after re-observation", State: map[string]any{"action": action},
 			})
 		}
-		state, err = b.runTaskActionOnce(ctx, request, action, arguments, message, min(progressValue+3, 99))
+		retryArguments := browserInteractionRetryArguments(action, arguments, state)
+		state, err = b.runTaskActionOnce(ctx, request, action, retryArguments, message, min(progressValue+3, 99))
 		report.Attempts = 2
 		if verification, ok := browserVerificationFromState(state); ok {
 			report.Verification = &verification
@@ -267,7 +268,9 @@ func browserInteractionVerified(action string, arguments map[string]any, state m
 		case "verified":
 			return true
 		case "observed":
-			return action == "extract" || action == "wait" || action == "scroll" || action == "hover"
+			if action == "extract" || action == "wait" || action == "scroll" || action == "hover" {
+				return true
+			}
 		}
 	}
 	return browserInteractionPostcondition(action, arguments, state)
@@ -318,6 +321,25 @@ func browserInteractionRetryable(action string, arguments map[string]any, policy
 		return browserStringValue(arguments["target_url"]) != ""
 	default:
 		return false
+	}
+}
+
+func browserInteractionRetryArguments(action string, arguments, state map[string]any) map[string]any {
+	targetURL := browserStringValue(arguments["target_url"])
+	currentURL := browserStringValue(state["url"])
+	if targetURL == "" || currentURL == "" || normalizeBrowserPageURL(targetURL) != normalizeBrowserPageURL(currentURL) {
+		return arguments
+	}
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "click", "play":
+		rebound := make(map[string]any, len(arguments))
+		for key, value := range arguments {
+			rebound[key] = value
+		}
+		rebound["expected_page_url"] = currentURL
+		return rebound
+	default:
+		return arguments
 	}
 }
 

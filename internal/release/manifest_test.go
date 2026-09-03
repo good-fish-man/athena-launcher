@@ -85,6 +85,50 @@ func TestGAManifestPinsCompatibilityAndComponentVersions(t *testing.T) {
 	}
 }
 
+func TestDevelopmentManifestAllowsAbsoluteLocalArtifact(t *testing.T) {
+	manifest := testManifest(time.Now().UTC())
+	manifest.Development = true
+	artifact := manifest.Database.Artifacts["darwin-arm64"]
+	artifact.URL = "file:///private/tmp/athena%20artifact.tar.gz"
+	artifact.CodeSigning = "DEVELOPMENT"
+	manifest.Database.Artifacts["darwin-arm64"] = artifact
+	manifest.Services[0].Artifacts["darwin-arm64"] = artifact
+
+	if err := manifest.Validate("darwin-arm64"); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestProductionManifestRejectsLocalArtifact(t *testing.T) {
+	manifest := testManifest(time.Now().UTC())
+	artifact := manifest.Database.Artifacts["darwin-arm64"]
+	artifact.URL = "file:///private/tmp/runtime.tar.gz"
+	manifest.Database.Artifacts["darwin-arm64"] = artifact
+
+	if err := manifest.Validate("darwin-arm64"); err == nil {
+		t.Fatal("Validate() accepted a local production artifact")
+	}
+}
+
+func TestDevelopmentManifestRejectsUnsafeLocalArtifact(t *testing.T) {
+	for _, artifactURL := range []string{
+		"file://remote-host/private/tmp/runtime.tar.gz",
+		"file:///private/tmp/../runtime.tar.gz",
+		"file:///private/tmp/runtime.tar.gz?version=1",
+		"runtime.tar.gz",
+	} {
+		manifest := testManifest(time.Now().UTC())
+		manifest.Development = true
+		artifact := manifest.Database.Artifacts["darwin-arm64"]
+		artifact.URL = artifactURL
+		artifact.CodeSigning = "DEVELOPMENT"
+		manifest.Database.Artifacts["darwin-arm64"] = artifact
+		if err := manifest.Validate("darwin-arm64"); err == nil {
+			t.Fatalf("Validate() accepted unsafe development artifact %q", artifactURL)
+		}
+	}
+}
+
 func testManifest(now time.Time) *Manifest {
 	hash := strings.Repeat("a", 64)
 	artifact := Artifact{URL: "https://releases.example/runtime.tar.gz", SHA256: hash, SizeBytes: 1024, SBOMSHA256: hash, CodeSigning: "NOTARIZED", Format: "tar.gz", Executable: "agent-runtime"}

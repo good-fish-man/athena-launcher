@@ -31,7 +31,7 @@ func newManagedDatabase(home, installDir, binDir, password string) *managedDatab
 	return &managedDatabase{
 		home: home, binDir: filepath.Join(installDir, filepath.FromSlash(binDir)),
 		dataDir: filepath.Join(home, "data", "postgres"), logPath: filepath.Join(home, "logs", "postgres.log"),
-		port: defaultDatabasePort, user: defaultDatabaseUser, password: password, database: defaultDatabaseName,
+		port: databasePort(), user: defaultDatabaseUser, password: password, database: defaultDatabaseName,
 	}
 }
 
@@ -147,12 +147,21 @@ func (d *managedDatabase) runningFromData(ctx context.Context) bool {
 }
 
 func (d *managedDatabase) validateBinaries() error {
-	for _, name := range []string{"initdb", "pg_ctl", "postgres", "pg_dump", "pg_restore"} {
+	for _, name := range []string{"initdb", "pg_ctl", "postgres"} {
 		if _, err := os.Stat(d.binary(name)); err != nil {
 			return fmt.Errorf("postgres package is missing %s: %w", d.binary(name), err)
 		}
 	}
 	return nil
+}
+
+func (d *managedDatabase) optionalBinary(name string) string {
+	path := d.binary(name)
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	return path
 }
 
 func (d *managedDatabase) binary(name string) string {

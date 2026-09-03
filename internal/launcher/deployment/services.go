@@ -2,9 +2,7 @@ package deployment
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,23 +25,22 @@ type managedProcess struct {
 }
 
 type supervisor struct {
-	home                 string
-	paths                *generatedPaths
-	manifest             *Manifest
-	executables          map[string]string
-	processes            map[string]*managedProcess
-	exits                chan processExit
-	stopping             bool
-	tracker              *startupTracker
-	browserEncryptionKey string
-	internalServiceToken string
-	preUpdateBackup      func(context.Context) error
+	home                   string
+	paths                  *generatedPaths
+	manifest               *Manifest
+	executables            map[string]string
+	processes              map[string]*managedProcess
+	exits                  chan processExit
+	stopping               bool
+	tracker                *startupTracker
+	browserDataDir         string
+	browserEncryptionKey   string
+	internalServiceToken   string
+	bootstrapAdminPassword string
 }
 
-func newSupervisor(home string, paths *generatedPaths, manifest *Manifest, executables map[string]string, tracker *startupTracker, browserEncryptionKey, internalServiceToken string) *supervisor {
-	value := &supervisor{home: home, paths: paths, manifest: manifest, executables: executables, processes: make(map[string]*managedProcess), exits: make(chan processExit, len(manifest.Services)*2), tracker: tracker, browserEncryptionKey: browserEncryptionKey, internalServiceToken: internalServiceToken}
-	value.preUpdateBackup = value.createPreUpdateBackup
-	return value
+func newSupervisor(home string, paths *generatedPaths, manifest *Manifest, executables map[string]string, tracker *startupTracker, browserDataDir, browserEncryptionKey, internalServiceToken, bootstrapAdminPassword string) *supervisor {
+	return &supervisor{home: home, paths: paths, manifest: manifest, executables: executables, processes: make(map[string]*managedProcess), exits: make(chan processExit, len(manifest.Services)*2), tracker: tracker, browserDataDir: browserDataDir, browserEncryptionKey: browserEncryptionKey, internalServiceToken: internalServiceToken, bootstrapAdminPassword: bootstrapAdminPassword}
 }
 
 func (s *supervisor) StartAll(ctx context.Context) error {
@@ -85,16 +82,8 @@ func (s *supervisor) Run(ctx context.Context, control *startupController, checkU
 				continue
 			}
 			s.tracker.protectingUpdate()
-			if s.preUpdateBackup == nil {
-				s.tracker.updateProtectionError(fmt.Errorf("pre-update backup is not configured"))
-				continue
-			}
-			if err := s.preUpdateBackup(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "[update] pre-update backup failed: %v\n", err)
-				s.tracker.updateProtectionError(err)
-				continue
-			}
-			s.tracker.applyingUpdate()
+			// The caller owns PostgreSQL and creates the recovery point only after
+			// every managed process and the database have stopped cleanly.
 			return errUpdateRequested
 		case event := <-s.exits:
 			if s.stopping {
@@ -118,41 +107,6 @@ func (s *supervisor) Run(ctx context.Context, control *startupController, checkU
 	}
 }
 
-func (s *supervisor) createPreUpdateBackup(ctx context.Context) error {
-	token := strings.TrimSpace(s.internalServiceToken)
-	if token == "" {
-		return fmt.Errorf("internal service token is unavailable")
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/api/agent-runtime-client/v1/internal/operations/backups", defaultClientHTTPPort), nil)
-	if err != nil {
-		return fmt.Errorf("create backup request: %w", err)
-	}
-	request.Header.Set("X-Athena-Internal-Token", token)
-	response, err := (&http.Client{Timeout: 5 * time.Minute}).Do(request)
-	if err != nil {
-		return fmt.Errorf("request encrypted backup: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("backup endpoint returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var manifest struct {
-		BackupID string `json:"backup_id"`
-		Status   string `json:"status"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&manifest); err != nil {
-		return fmt.Errorf("decode backup response: %w", err)
-	}
-	if strings.TrimSpace(manifest.BackupID) == "" || !strings.EqualFold(manifest.Status, "complete") {
-		return fmt.Errorf("backup endpoint returned an incomplete recovery point")
-	}
-	fmt.Printf("[update] encrypted recovery point created: %s\n", manifest.BackupID)
-	return nil
-}
-
 func (s *supervisor) start(ctx context.Context, spec ServiceSpec) (returnErr error) {
 	s.tracker.begin(spec.Name, "Starting "+spec.Name)
 	defer func() {
@@ -173,9 +127,7 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) (returnErr err
 	for key, value := range spec.Env {
 		env = setEnvironmentValue(env, key, expandValue(value, values))
 	}
-	if s.browserEncryptionKey != "" {
-		env = setEnvironmentValue(env, "AGENT_BROWSER_ENCRYPTION_KEY", s.browserEncryptionKey)
-	}
+	env = managedBrowserEnvironment(env, effectiveManagedBrowserDataDir(s.browserDataDir), s.browserEncryptionKey)
 	if s.internalServiceToken != "" {
 		env = setEnvironmentValue(env, "ATHENA_INTERNAL_SERVICE_TOKEN", s.internalServiceToken)
 	}
@@ -186,6 +138,10 @@ func (s *supervisor) start(ctx context.Context, spec ServiceSpec) (returnErr err
 	case "agent-runtime":
 		env = append(env, "AGENT_RUNTIME_CONFIG="+s.paths.runtimeConfig)
 	case "agent-runtime-client":
+		if s.bootstrapAdminPassword != "" {
+			env = setEnvironmentValue(env, "ATHENA_BOOTSTRAP_ADMIN_USERNAME", "athena")
+			env = setEnvironmentValue(env, "ATHENA_BOOTSTRAP_ADMIN_PASSWORD", s.bootstrapAdminPassword)
+		}
 		if len(args) == 0 {
 			args = []string{"--config", s.paths.clientConfig}
 		}
@@ -251,6 +207,26 @@ func setEnvironmentValue(env []string, key, value string) []string {
 		}
 	}
 	return append(result, prefix+value)
+}
+
+func effectiveManagedBrowserDataDir(configured string) string {
+	for _, key := range []string{"ATHENA_AGENT_BROWSER_HOME", "AGENT_BROWSER_HOME"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return strings.TrimSpace(configured)
+}
+
+func managedBrowserEnvironment(env []string, dataDir, encryptionKey string) []string {
+	if dataDir = strings.TrimSpace(dataDir); dataDir != "" {
+		env = setEnvironmentValue(env, "AGENT_BROWSER_HOME", dataDir)
+		env = setEnvironmentValue(env, "ATHENA_AGENT_BROWSER_HOME", dataDir)
+	}
+	if encryptionKey = strings.TrimSpace(encryptionKey); encryptionKey != "" {
+		env = setEnvironmentValue(env, "AGENT_BROWSER_ENCRYPTION_KEY", encryptionKey)
+	}
+	return env
 }
 
 func (s *supervisor) StopAll() {

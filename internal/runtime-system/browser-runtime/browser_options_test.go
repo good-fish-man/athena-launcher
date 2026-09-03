@@ -406,6 +406,21 @@ func TestValidateBrowserPagePreconditionAcceptsCanonicalRedirect(t *testing.T) {
 	}
 }
 
+func TestValidateBrowserPagePreconditionIgnoresAgentBrowserDiagnostics(t *testing.T) {
+	run := func(_ time.Duration, args ...string) (string, error) {
+		if strings.Join(args, " ") == "get url" {
+			return "[agent-browser] restore: missing; save: saved\nhttps://www.youtube.com/watch?v=second", nil
+		}
+		return "", errors.New("unexpected command")
+	}
+	if err := validateBrowserPagePrecondition(run, nil, "https://www.youtube.com/watch?v=second"); err != nil {
+		t.Fatalf("agent-browser diagnostics contaminated the URL result: %v", err)
+	}
+	if got := cleanBrowserCommandOutput("[agent-browser] restore: missing\n{\"success\":true}"); got != `{"success":true}` {
+		t.Fatalf("clean command output = %q", got)
+	}
+}
+
 func TestParseBrowserPlaybackStateFromAgentBrowserEnvelope(t *testing.T) {
 	state, ok := parseBrowserPlaybackState(`{"success":true,"data":{"result":{"found":true,"playing":true,"paused":false,"kind":"dom_player","current_time":12.5,"media_id":"song-1","media_title":"First song","media_url":"https://y.qq.com/n/ryqq_v2/songDetail/song-1"}}}`)
 	if !ok || !browserPlaybackVerified(state) {

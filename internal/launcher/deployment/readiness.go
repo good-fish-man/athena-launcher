@@ -18,7 +18,7 @@ func launcherReadiness(home string) ga.ReadinessReport {
 		checks = append(checks, launcherCheck("identity.recovery", "security", ga.StatusFail, stateErr.Error()))
 	} else {
 		instanceID = state.DeviceID
-		if state.DBPassword == "" || state.BrowserEncryptionKey == "" || state.BackupEncryptionKey == "" || state.InternalServiceToken == "" || state.DeviceID == "" {
+		if state.DBPassword == "" || state.BrowserEncryptionKey == "" || state.BackupEncryptionKey == "" || state.InternalServiceToken == "" || state.BootstrapAdminPassword == "" || state.DeviceID == "" {
 			checks = append(checks, launcherCheck("identity.recovery", "security", ga.StatusFail, "installation identity is incomplete"))
 		} else {
 			checks = append(checks, launcherCheck("identity.recovery", "security", ga.StatusPass, "installation identity is mirrored in protected recovery secrets"))
@@ -61,13 +61,26 @@ func launcherReadiness(home string) ga.ReadinessReport {
 	} else {
 		checks = append(checks, launcherCheck("recovery.key", "recovery", ga.StatusFail, "backup encryption identity is unavailable"))
 	}
-	backupCount, backupErr := countBackupManifests(filepath.Join(home, "backups"))
+	logicalBackupCount, logicalBackupErr := countBackupManifests(filepath.Join(home, "backups", "logical"))
+	managedBackupCount := 0
+	managedBackupErr := error(nil)
+	if stateErr != nil || strings.TrimSpace(state.BackupEncryptionKey) == "" {
+		managedBackupErr = fmt.Errorf("managed recovery points cannot be authenticated without the installation backup key")
+	} else {
+		managedBackupCount, managedBackupErr = authenticatedManagedRecoveryInventory(home, state.BackupEncryptionKey)
+	}
+	backupErr := logicalBackupErr
+	if backupErr == nil {
+		backupErr = managedBackupErr
+	}
 	if backupErr != nil {
 		checks = append(checks, launcherCheck("recovery.backup", "recovery", ga.StatusFail, backupErr.Error()))
-	} else if backupCount == 0 {
-		checks = append(checks, launcherCheck("recovery.backup", "recovery", ga.StatusExternalRequired, "create and verify an encrypted backup before GA release"))
+	} else if managedBackupCount > 0 {
+		checks = append(checks, launcherCheck("recovery.backup", "recovery", ga.StatusPass, fmt.Sprintf("%d authenticated managed recovery point(s) are retained (%d logical backup manifest(s) require control-plane verification)", managedBackupCount, logicalBackupCount)))
+	} else if logicalBackupCount > 0 {
+		checks = append(checks, launcherCheck("recovery.backup", "recovery", ga.StatusExternalRequired, fmt.Sprintf("%d logical backup manifest(s) exist; verify them through the control plane before GA release", logicalBackupCount)))
 	} else {
-		checks = append(checks, launcherCheck("recovery.backup", "recovery", ga.StatusPass, fmt.Sprintf("%d backup manifest(s) are retained", backupCount)))
+		checks = append(checks, launcherCheck("recovery.backup", "recovery", ga.StatusExternalRequired, "create and verify an encrypted backup before GA release"))
 	}
 
 	if manifestErr == nil {
@@ -97,6 +110,37 @@ func countBackupManifests(directory string) (int, error) {
 				count++
 			}
 		}
+	}
+	return count, nil
+}
+
+func authenticatedManagedRecoveryInventory(home, encodedKey string) (int, error) {
+	directory := filepath.Join(home, "recovery", "managed-postgres")
+	entries, err := os.ReadDir(directory)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read managed recovery inventory: %w", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			return 0, fmt.Errorf("managed recovery inventory contains a symbolic link: %s", entry.Name())
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		if !managedRecoveryIDPattern.MatchString(entry.Name()) {
+			if _, statErr := os.Stat(filepath.Join(directory, entry.Name(), "manifest.json")); statErr == nil {
+				return 0, fmt.Errorf("managed recovery inventory contains an invalid recovery point id: %s", entry.Name())
+			}
+			continue
+		}
+		if _, err := inspectManagedPostgresRecoveryPoint(home, encodedKey, entry.Name()); err != nil {
+			return 0, fmt.Errorf("authenticate managed recovery point %s: %w", entry.Name(), err)
+		}
+		count++
 	}
 	return count, nil
 }

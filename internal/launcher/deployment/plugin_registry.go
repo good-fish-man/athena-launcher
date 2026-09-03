@@ -84,7 +84,7 @@ func createLocalPluginSigningIdentity(paths pluginRegistryPaths) error {
 	digest := sha256.Sum256(publicKey)
 	keyID := "athena-local-" + hex.EncodeToString(digest[:8])
 	privateDocument := localSigningKey{Schema: "athena.plugin-signing-key.v1", KeyID: keyID, Algorithm: pluginv1.SignatureEd25519, PrivateKey: base64.StdEncoding.EncodeToString(privateKey)}
-	trustDocument := localTrustStore{Schema: "athena.plugin-trust.v1", Keys: []localTrustKey{{KeyID: keyID, Algorithm: pluginv1.SignatureEd25519, PublicKey: base64.StdEncoding.EncodeToString(publicKey)}}}
+	trustDocument := localTrustStore{Schema: pluginv1.TrustStoreSchema, Keys: []localTrustKey{{KeyID: keyID, Algorithm: pluginv1.SignatureEd25519, PublicKey: base64.StdEncoding.EncodeToString(publicKey)}}}
 	privateData, _ := json.MarshalIndent(privateDocument, "", "  ")
 	trustData, _ := json.MarshalIndent(trustDocument, "", "  ")
 	if err := writeAtomic(paths.privateKey, privateData, 0o600); err != nil {

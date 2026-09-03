@@ -48,6 +48,11 @@ func TestBrowserInteractionVerifiedUsesPerceptionVerification(t *testing.T) {
 	if browserInteractionVerified("click", nil, nil, verification) {
 		t.Fatal("uncertain click was accepted")
 	}
+	verification.Status = "observed"
+	state := map[string]any{"playback": map[string]any{"playing": true, "verified": true}}
+	if !browserInteractionVerified("play", nil, state, verification) {
+		t.Fatal("an observed action did not fall through to its verified postcondition")
+	}
 }
 
 func TestBrowserInteractionPostconditionVerifiesNavigationAndPlayback(t *testing.T) {
@@ -62,10 +67,38 @@ func TestBrowserInteractionPostconditionVerifiesNavigationAndPlayback(t *testing
 
 func TestBrowserInteractionDoesNotRetrySideEffectfulActions(t *testing.T) {
 	allow := browserActionPolicyDecision{Risk: "LOW", Decision: "ALLOW"}
-	if browserInteractionRetryable("type", nil, allow) || browserInteractionRetryable("download", nil, allow) {
-		t.Fatal("side-effectful action was marked retryable")
+	for _, action := range []string{"type", "select", "press", "download", "upload", "drag"} {
+		if browserInteractionRetryable(action, nil, allow) {
+			t.Fatalf("side-effectful action %q was marked retryable", action)
+		}
+	}
+	if browserInteractionRetryable("click", map[string]any{"target_label": "Buy now"}, allow) {
+		t.Fatal("an ungrounded click was marked retryable")
 	}
 	if !browserInteractionRetryable("navigate", nil, allow) {
 		t.Fatal("reversible navigation was not retryable")
+	}
+}
+
+func TestBrowserInteractionRetryArgumentsRebindsOnlyResolvedTargetPage(t *testing.T) {
+	original := map[string]any{
+		"target_url":        "https://video.example/watch/second",
+		"expected_page_url": "https://video.example/home",
+	}
+	rebound := browserInteractionRetryArguments("play", original, map[string]any{
+		"url": "https://video.example/watch/second/",
+	})
+	if got := browserStringValue(rebound["expected_page_url"]); got != "https://video.example/watch/second/" {
+		t.Fatalf("retry precondition = %q", got)
+	}
+	if got := browserStringValue(original["expected_page_url"]); got != "https://video.example/home" {
+		t.Fatalf("original arguments were mutated: %q", got)
+	}
+
+	unrelated := browserInteractionRetryArguments("play", original, map[string]any{
+		"url": "https://video.example/watch/wrong",
+	})
+	if got := browserStringValue(unrelated["expected_page_url"]); got != "https://video.example/home" {
+		t.Fatalf("unrelated page bypassed the original precondition: %q", got)
 	}
 }

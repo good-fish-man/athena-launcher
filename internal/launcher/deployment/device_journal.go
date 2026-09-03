@@ -139,6 +139,12 @@ func (d *deviceRuntime) beginDurableAction(action deviceAction) error {
 func (d *deviceRuntime) remember(action deviceAction, observation deviceObservation) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if observation.FinishedAt.IsZero() {
+		observation.FinishedAt = time.Now().UTC()
+	}
+	if observation.ObservedAt.IsZero() || observation.ObservedAt.Before(observation.FinishedAt) {
+		observation.ObservedAt = observation.FinishedAt
+	}
 	if d.completed == nil {
 		d.completed = make(map[string]deviceObservation)
 	}

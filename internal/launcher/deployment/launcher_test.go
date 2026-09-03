@@ -80,6 +80,34 @@ func TestSetEnvironmentValueReplacesExistingValues(t *testing.T) {
 	}
 }
 
+func TestManagedBrowserEnvironmentUsesStablePersistence(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "browser-data")
+	environment := managedBrowserEnvironment([]string{
+		"AGENT_BROWSER_HOME=/old/browser-data",
+		"ATHENA_AGENT_BROWSER_HOME=/old/athena-browser-data",
+		"AGENT_BROWSER_ENCRYPTION_KEY=old-key",
+	}, dataDir, "stable-key")
+	for key, want := range map[string]string{
+		"AGENT_BROWSER_HOME":           dataDir,
+		"ATHENA_AGENT_BROWSER_HOME":    dataDir,
+		"AGENT_BROWSER_ENCRYPTION_KEY": "stable-key",
+	} {
+		if got := deploymentEnvironmentValue(environment, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func deploymentEnvironmentValue(environment []string, key string) string {
+	prefix := key + "="
+	for index := len(environment) - 1; index >= 0; index-- {
+		if strings.HasPrefix(environment[index], prefix) {
+			return strings.TrimPrefix(environment[index], prefix)
+		}
+	}
+	return ""
+}
+
 func TestSafeArchivePath(t *testing.T) {
 	root := t.TempDir()
 	if _, err := safeArchivePath(root, "bin/agent-runtime"); err != nil {

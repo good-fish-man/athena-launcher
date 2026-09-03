@@ -26,6 +26,17 @@ func writeGeneratedConfigs(home string, state *launcherState, executables map[st
 	if err != nil {
 		return nil, err
 	}
+	logicalBackupDir := ""
+	logicalBackupKeyFile := ""
+	pgDumpPath := executables["pg_dump"]
+	pgRestorePath := executables["pg_restore"]
+	if pgDumpPath != "" && pgRestorePath != "" {
+		logicalBackupDir = filepath.Join(home, "backups", "logical")
+		logicalBackupKeyFile = backupKeyFile
+	} else {
+		pgDumpPath = ""
+		pgRestorePath = ""
+	}
 	for _, directory := range []string{configDir, uploadsDir, userSkillsDir, filepath.Join(home, "logs")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, err
@@ -93,8 +104,8 @@ paths:
   uploads_dir: %s
 `, defaultClientHTTPPort, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort, yamlString(state.InternalServiceToken),
 		yamlString(pluginPaths.packages), yamlString(pluginPaths.registry), yamlString(pluginPaths.trustStore), yamlString(pluginPaths.audit),
-		yamlString(filepath.Join(home, "backups")), yamlString(backupKeyFile), yamlString(executables["pg_dump"]), yamlString(executables["pg_restore"]),
-		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), defaultDatabasePort, yamlString(defaultDatabaseName),
+		yamlString(logicalBackupDir), yamlString(logicalBackupKeyFile), yamlString(pgDumpPath), yamlString(pgRestorePath),
+		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), databasePort(), yamlString(defaultDatabaseName),
 		yamlString(paths.clientConfig), yamlString(paths.skillsConfig), yamlString(uploadsDir))
 	runtimeYAML := fmt.Sprintf(`server:
   grpc_addr: ":%d"
@@ -145,7 +156,7 @@ plugins:
   trust_store_path: %s
   audit_path: %s
 `, defaultRuntimeGRPCPort, defaultRuntimeHTTPPort,
-		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), defaultDatabasePort, yamlString(defaultDatabaseName),
+		yamlString(defaultDatabaseUser), yamlString(state.DBPassword), databasePort(), yamlString(defaultDatabaseName),
 		yamlString(userSkillsDir), yamlString(paths.skillsConfig), yamlString(runtimeSkillsDir),
 		yamlString(pluginPaths.packages), yamlString(pluginPaths.registry), yamlString(pluginPaths.trustStore), yamlString(pluginPaths.audit))
 	if err := writeAtomic(paths.clientConfig, []byte(clientYAML), 0o600); err != nil {

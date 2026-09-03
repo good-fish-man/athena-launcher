@@ -102,14 +102,18 @@ The first local-mode launch can take several minutes while PostgreSQL and servic
 
 ### First Login
 
-Agent Runtime Client creates the bootstrap administrator only when the `athena` account is absent from the database:
+Agent Runtime Client creates the bootstrap administrator only when the `athena`
+account is absent from the database. Launcher generates a different random
+password for every installation. It is not embedded in any binary, manifest, or
+generated YAML. Read it locally from:
 
 ```text
-username: athena
-password: athena
+~/.athena/secrets/bootstrap-admin.password
 ```
 
-Restarting Athena does not recreate the account or reset a changed password. These credentials are intended only for initial use in a trusted local environment; replace the default password before exposing Athena to other machines.
+The secret file is owner-readable only. Restarting Athena does not recreate the
+account or reset, activate, or elevate an existing account. Change the generated
+password after first login and never publish the contents of the secrets directory.
 
 ## Startup Center and Logs
 
@@ -201,6 +205,8 @@ make desktop
 make desktop-run
 ```
 
+The source pins the official release Ed25519 public key, so `go run ./cmd/athena-launcher validate`, `make build`, and `make desktop-run` need no `ATHENA_RELEASE_PUBLIC_KEY` when they use the default official manifest. Launcher does not download a public key at runtime because fetching it beside the manifest would not establish an independent trust root. A local manifest with `development: true` skips release-signature verification while retaining schema, platform, hash, and safe-path validation. `ATHENA_RELEASE_PUBLIC_KEY` is limited to local signed-manifest release-pipeline and integration tests; public production manifests always use the key compiled into the binary.
+
 `make build` creates the headless/CLI build with its browser interface; `make desktop` compiles a local Wails desktop shell with developer tools enabled. For local UI testing, `make desktop-run` first runs `npm run build` in the sibling `frontend/agent-ui` project and launches Athena with that local `dist` directory. Press `F12` (or `Fn+F12` on compact Mac keyboards) to open the WebView inspector. On macOS it also creates `dist/Athena.app` with the microphone, speech-recognition, and location privacy declarations required by the system permission prompts. It bypasses downloaded UI packages and UI update prompts while still using manifest-managed backend services. Set `FRONTEND_PROJECT=/path/to/agent-ui` when the repositories are not in the default sibling layout, or pass `--frontend-dir /absolute/path/to/dist` directly. Release workflows intentionally omit the `devtools` build tag. On Linux, install `build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev` and include the `webkit2_41` tag for release builds.
 
 Build all launcher binaries:
@@ -254,7 +260,8 @@ Repository-scoped GitHub tokens cannot create releases in the other repositories
 
 - Managed PostgreSQL listens only on `127.0.0.1:15432`.
 - The generated database password is stored in mode `0600` configuration/state files.
-- A stable agent-browser vault key is generated once in the mode `0600` launcher state and reused across service and package updates.
+- A stable agent-browser vault key is generated once in the mode `0600` launcher state and recovery key file, then reused across service and package updates.
+- The agent-browser data directory is persisted as an absolute path in launcher state and a protected recovery file; existing installations continue to use their original `~/.agent-browser`. The launcher and every managed service receive the same `AGENT_BROWSER_HOME`, `ATHENA_AGENT_BROWSER_HOME`, and vault key, so updating a versioned executable does not switch credential or session storage. Either home variable may select a custom directory before the value is first saved; later temporary overrides must be applied consistently to every related process.
 - A separate random internal-service token authenticates Runtime-to-Client scheduled-task requests.
 - A stable local Ed25519 key signs private Capability Providers; only its public
   key is placed in the Runtime trust store.

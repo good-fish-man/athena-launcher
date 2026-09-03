@@ -4,6 +4,7 @@ import (
 	statepkg "athena-launcher/internal/state"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -21,6 +22,7 @@ import (
 var (
 	browserSessionPattern        = regexp.MustCompile(`^athena-[a-f0-9]{32}$`)
 	browserRefPattern            = regexp.MustCompile(`^@e[0-9]+$`)
+	browserTabPattern            = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	browserElementLineAtRef      = regexp.MustCompile(`@e[0-9]+`)
 	browserElementLineBracketRef = regexp.MustCompile(`\[ref=([eE][0-9]+)(?:\s*,\s*)?`)
 )
@@ -39,6 +41,8 @@ const browserDocumentObservationScript = `(() => ({
 
 type browserController struct {
 	home           string
+	dataDir        string
+	encryptionKey  string
 	runtime        *browserRuntime
 	perception     *perceptionLayer
 	taskPlanner    *browserTaskPlanner
@@ -94,17 +98,18 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 		return strings.TrimSpace(text)
 	}
 	run := func(timeout time.Duration, args ...string) (string, error) {
+		operation := browserCommandOperation(args)
 		commandCtx, cancel := context.WithTimeout(ctx, timeout)
 		command := b.browserCommand(commandCtx, executable, args...)
 		output, commandErr := command.CombinedOutput()
 		commandContextErr := commandCtx.Err()
 		cancel()
 		if commandContextErr != nil {
-			return "", fmt.Errorf("browser action timed out: %w", commandContextErr)
+			return "", fmt.Errorf("agent-browser %s timed out after %s: %w", operation, timeout, commandContextErr)
 		}
 		if commandErr != nil {
 			detail := strings.TrimSpace(string(output))
-			if isRecoverableBrowserConnectionError(detail) && clearStaleBrowserSessionConfig(request.SessionID) == nil {
+			if isRecoverableBrowserConnectionError(detail) && clearStaleBrowserSessionConfig(request.SessionID, b.dataDir) == nil {
 				if b.runtime != nil {
 					b.runtime.SetHeaded(request.SessionID, false)
 				}
@@ -114,10 +119,10 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 				retryContextErr := retryCtx.Err()
 				retryCancel()
 				if retryContextErr != nil {
-					return "", fmt.Errorf("browser recovery timed out: %w", retryContextErr)
+					return "", fmt.Errorf("agent-browser %s recovery timed out after %s: %w", operation, timeout, retryContextErr)
 				}
 				if retryErr == nil {
-					return strings.TrimSpace(string(retryOutput)), nil
+					return cleanBrowserCommandOutput(string(retryOutput)), nil
 				}
 				commandErr = retryErr
 				detail = strings.TrimSpace(string(retryOutput))
@@ -126,11 +131,11 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 				detail = detail[len(detail)-4000:]
 			}
 			if hasBrowserArgument(args, "--auto-connect") && strings.Contains(strings.ToLower(detail), "no running chrome instance") {
-				return "", fmt.Errorf("auto_connect could not find a Chrome CDP session; launch Chrome with --remote-debugging-port=9222, then retry: %s", detail)
+				return "", fmt.Errorf("agent-browser %s: auto_connect could not find a Chrome CDP session; launch Chrome with --remote-debugging-port=9222, then retry: %s", operation, detail)
 			}
-			return "", fmt.Errorf("agent-browser: %w: %s", commandErr, detail)
+			return "", fmt.Errorf("agent-browser %s: %w: %s", operation, commandErr, detail)
 		}
-		return strings.TrimSpace(string(output)), nil
+		return cleanBrowserCommandOutput(string(output)), nil
 	}
 	sessionArgs := b.sessionArgs(request.SessionID)
 	var playback map[string]any
@@ -169,23 +174,28 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 				label = "page"
 			}
 			if tabRef := reusableBrowserTabRef(run, sessionArgs, target, label); tabRef != "" {
-				if _, err := run(30*time.Second, append(sessionArgs, "tab", tabRef)...); err != nil {
+				if err := runIdempotentBrowserCommand(run, 30*time.Second, append(sessionArgs, "tab", tabRef)...); err != nil {
 					return nil, err
 				}
-				if _, err := run(30*time.Second, append(sessionArgs, "open", target)...); err != nil {
+				if err := runBrowserNavigationCommand(run, sessionArgs, target, append(sessionArgs, "open", target)...); err != nil {
 					return nil, err
 				}
 				request.Arguments["tab_ref"] = tabRef
 			} else {
 				args := append(append([]string{}, sessionArgs...), "tab", "new", "--label", label, target)
 				if _, err := run(30*time.Second, args...); err != nil {
-					return nil, err
+					if recoveredRef, recovered := activateExactBrowserTarget(run, sessionArgs, target); recovered {
+						request.Arguments["tab_ref"] = recoveredRef
+						request.Arguments["navigation_recovered"] = true
+					} else {
+						return nil, err
+					}
 				}
 			}
 			request.Arguments["tab_label"] = label
 		} else {
 			args := browserOpenArgs(sessionArgs, target, request.UserTakeover || headed)
-			if _, err := run(30*time.Second, args...); err != nil {
+			if err := runBrowserNavigationCommand(run, sessionArgs, target, args...); err != nil {
 				return nil, err
 			}
 		}
@@ -248,7 +258,7 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 			}
 			expectedMediaKind, expectedMediaID = browserMediaIdentity(target)
 			if normalizeBrowserPageURL(currentURL) != normalizeBrowserPageURL(target) {
-				if _, err := run(30*time.Second, append(sessionArgs, "open", target)...); err != nil {
+				if err := runBrowserNavigationCommand(run, sessionArgs, target, append(sessionArgs, "open", target)...); err != nil {
 					return nil, err
 				}
 				if _, err := run(12*time.Second, append(sessionArgs, "wait", "1200")...); err != nil {
@@ -389,10 +399,25 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 		}
 	case "back", "forward", "refresh":
 		command := request.Action
+		beforeURL, _ := run(10*time.Second, append(sessionArgs, "get", "url")...)
 		if command == "refresh" {
 			command = "reload"
+			persistedURL := ""
+			if b.runtime != nil {
+				persistedURL = b.runtime.Snapshot().Sessions[request.SessionID].CurrentURL
+			}
+			var restored bool
+			beforeURL, restored, err = prepareBrowserRefreshTarget(run, sessionArgs, beforeURL, persistedURL)
+			if err != nil {
+				return nil, err
+			}
+			if restored {
+				if request.Arguments == nil {
+					request.Arguments = make(map[string]any)
+				}
+				request.Arguments["restored_current_page"] = true
+			}
 		}
-		beforeURL, _ := run(10*time.Second, append(sessionArgs, "get", "url")...)
 		beforeTitle, _ := run(10*time.Second, append(sessionArgs, "get", "title")...)
 		if _, err := run(30*time.Second, append(sessionArgs, command)...); err != nil {
 			return nil, err
@@ -427,7 +452,26 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 	case "upload":
 		return nil, fmt.Errorf("upload requires the native file picker and user takeover")
 	case "close":
-		_, err := run(10*time.Second, append(sessionArgs, "close")...)
+		if tabID := value("tab_id"); tabID != "" {
+			if !browserTabPattern.MatchString(tabID) {
+				return nil, fmt.Errorf("invalid browser tab id %q", tabID)
+			}
+			if _, err := run(10*time.Second, append(sessionArgs, "tab", "close", tabID)...); err != nil {
+				return nil, err
+			}
+			observation, err := browserObservation(run, sessionArgs)
+			if err != nil {
+				return nil, err
+			}
+			observation["closed"] = true
+			observation["closed_tab_id"] = tabID
+			annotateBrowserIntervention(observation)
+			return b.observeBrowser(request, observation, run, sessionArgs), nil
+		}
+		daemonPID, pidErr := b.managedBrowserDaemonPID(request.SessionID)
+		_, closeErr := run(10*time.Second, append(sessionArgs, "close")...)
+		stopErr := b.stopManagedBrowserDaemon(request.SessionID, daemonPID)
+		err := errors.Join(pidErr, closeErr, stopErr)
 		return map[string]any{"closed": err == nil}, err
 	default:
 		return nil, fmt.Errorf("unsupported browser action %q", request.Action)
@@ -445,6 +489,79 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 	}
 	observation = b.observeBrowser(request, observation, run, sessionArgs)
 	return observation, nil
+}
+
+func browserCommandOperation(arguments []string) string {
+	known := map[string]bool{
+		"open": true, "tab": true, "snapshot": true, "get": true, "eval": true,
+		"click": true, "fill": true, "hover": true, "select": true, "drag": true,
+		"press": true, "scroll": true, "wait": true, "back": true, "forward": true,
+		"reload": true, "screenshot": true, "download": true, "close": true, "status": true,
+	}
+	for index, argument := range arguments {
+		if !known[argument] {
+			continue
+		}
+		if argument == "tab" && index+1 < len(arguments) {
+			switch arguments[index+1] {
+			case "new", "list", "close":
+				return "tab." + arguments[index+1]
+			}
+		}
+		return argument
+	}
+	return "command"
+}
+
+func runIdempotentBrowserCommand(run browserCommandRunner, timeout time.Duration, arguments ...string) error {
+	if _, err := run(timeout, arguments...); err == nil {
+		return nil
+	} else {
+		firstErr := err
+		if _, retryErr := run(timeout, arguments...); retryErr == nil {
+			return nil
+		} else {
+			return fmt.Errorf("browser command failed after one retry: first attempt: %v | retry: %w", firstErr, retryErr)
+		}
+	}
+}
+
+func runBrowserNavigationCommand(run browserCommandRunner, sessionArgs []string, target string, arguments ...string) error {
+	if _, err := run(30*time.Second, arguments...); err == nil {
+		return nil
+	} else {
+		firstErr := err
+		if _, recovered := activateExactBrowserTarget(run, sessionArgs, target); recovered {
+			return nil
+		}
+		if _, retryErr := run(30*time.Second, arguments...); retryErr == nil {
+			return nil
+		} else if _, recovered := activateExactBrowserTarget(run, sessionArgs, target); recovered {
+			return nil
+		} else {
+			return fmt.Errorf("browser navigation failed after one retry: first attempt: %v | retry: %w", firstErr, retryErr)
+		}
+	}
+}
+
+func activateExactBrowserTarget(run browserCommandRunner, sessionArgs []string, target string) (string, bool) {
+	output, err := run(10*time.Second, append(sessionArgs, "tab", "list", "--json")...)
+	if err != nil {
+		return "", false
+	}
+	want := normalizeBrowserPageURL(target)
+	for _, tab := range parseBrowserCommandTabs(output) {
+		if tab.Ref == "" || normalizeBrowserPageURL(tab.URL) != want {
+			continue
+		}
+		if !tab.Active {
+			if err := runIdempotentBrowserCommand(run, 10*time.Second, append(sessionArgs, "tab", tab.Ref)...); err != nil {
+				return "", false
+			}
+		}
+		return tab.Ref, true
+	}
+	return "", false
 }
 
 func waitForBrowserDocumentTransition(
@@ -495,12 +612,16 @@ func isRecoverableBrowserConnectionError(detail string) bool {
 		strings.Contains(lower, "socket")
 }
 
-func clearStaleBrowserSessionConfig(sessionID string) error {
+func clearStaleBrowserSessionConfig(sessionID string, configuredDataDir ...string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if !browserSessionPattern.MatchString(sessionID) {
 		return fmt.Errorf("invalid browser session id")
 	}
-	root := strings.TrimSpace(os.Getenv("ATHENA_AGENT_BROWSER_HOME"))
+	configured := ""
+	if len(configuredDataDir) > 0 {
+		configured = configuredDataDir[0]
+	}
+	root := effectiveAgentBrowserDataDir(configured)
 	if root == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -538,6 +659,28 @@ func browserAgentSessionActive(run browserCommandRunner, sessionArgs []string) b
 		} `json:"data"`
 	}
 	return json.Unmarshal([]byte(output), &response) == nil && response.Success && response.Data.Active
+}
+
+func prepareBrowserRefreshTarget(run browserCommandRunner, sessionArgs []string, currentURL, persistedURL string) (string, bool, error) {
+	if current, err := validateBrowserTarget(currentURL); err == nil {
+		return current, false, nil
+	}
+	persisted, err := validateBrowserTarget(persistedURL)
+	if err != nil {
+		return "", false, fmt.Errorf("no live browser page is available to refresh")
+	}
+	if err := runBrowserNavigationCommand(run, sessionArgs, persisted, append(sessionArgs, "open", persisted)...); err != nil {
+		return "", false, fmt.Errorf("restore current browser page before refresh: %w", err)
+	}
+	restored, err := run(10*time.Second, append(sessionArgs, "get", "url")...)
+	if err != nil {
+		return "", false, fmt.Errorf("observe restored browser page: %w", err)
+	}
+	restored, err = validateBrowserTarget(restored)
+	if err != nil {
+		return "", false, fmt.Errorf("restored browser page is unavailable")
+	}
+	return restored, true, nil
 }
 
 func shouldRestartBrowserAsHeaded(requiresHeaded, hasContent, liveSession, headedNow, loadedHeaded bool) bool {
@@ -793,7 +936,14 @@ func safeBrowserTabLabel(value string) string {
 			break
 		}
 	}
-	return strings.Trim(builder.String(), "-")
+	label := strings.Trim(builder.String(), "-")
+	if label == "" {
+		return ""
+	}
+	if label[0] < 'a' || label[0] > 'z' {
+		label = "page-" + label
+	}
+	return label
 }
 
 func browserDownloadFileSnapshot(path string, started time.Time) map[string]any {

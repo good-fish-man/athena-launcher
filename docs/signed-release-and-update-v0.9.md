@@ -10,7 +10,7 @@ Athena v0.9 uses a fail-closed release chain:
 6. Launcher verifies manifest signature/expiry, SBOM hash, artifact hash/signature, platform code signature, and upgrade floor before install.
 7. A local update creates an encrypted PostgreSQL backup before stopping the old services.
 
-Remote manifests cannot enable development mode. Production manifests without a configured public key are rejected. An already installed and previously verified release may continue to run after manifest expiry, but a new download cannot use an expired manifest.
+Remote manifests cannot enable development mode. Production manifests without a configured public key are rejected. Source builds pin the official release key and production builds may replace it at link time; an empty build parameter does not erase the source default. Launcher never downloads a public key from beside the manifest because an attacker could replace both assets. `ATHENA_RELEASE_PUBLIC_KEY` may override verification only for a local signed manifest used by the release pipeline or integration tests, never the compiled trust root for a public manifest. An already installed and previously verified release may continue to run after manifest expiry, but a new download cannot use an expired manifest.
 
 macOS requires a valid Developer ID signature and notarization evidence. Windows requires Authenticode. Linux packages must carry a distribution, GPG, Cosign, or other allowlisted package signature. Production publication fails closed when any platform evidence is unavailable; there is no unsigned emergency override. Restore service by republishing a correctly signed artifact and manifest, never by weakening verification.
 

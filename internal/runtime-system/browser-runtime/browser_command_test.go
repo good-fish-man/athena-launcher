@@ -35,6 +35,39 @@ func TestBrowserCommandEnvironmentPreservesExplicitSocketDirectory(t *testing.T)
 	}
 }
 
+func TestConfiguredBrowserCommandEnvironmentUsesStablePersistence(t *testing.T) {
+	t.Setenv(athenaAgentBrowserHomeEnv, "")
+	t.Setenv(agentBrowserHomeEnv, "")
+	t.Setenv(agentBrowserEncryptionKeyEnv, "ambient-key")
+	dataDir := filepath.Join(t.TempDir(), "browser-data")
+	environment := configuredBrowserCommandEnvironment(t.TempDir(), dataDir, "stable-key")
+	for key, want := range map[string]string{
+		agentBrowserHomeEnv:          dataDir,
+		athenaAgentBrowserHomeEnv:    dataDir,
+		agentBrowserEncryptionKeyEnv: "stable-key",
+	} {
+		if got := environmentValue(environment, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestBrowserCommandEnvironmentBoundsManagedDaemonLifetime(t *testing.T) {
+	t.Setenv("ATHENA_BROWSER_AUTH_MODE", browserAuthModeIsolated)
+	t.Setenv(agentBrowserIdleTimeoutEnv, "")
+	if got := environmentValue(browserCommandEnvironment(t.TempDir()), agentBrowserIdleTimeoutEnv); got != managedBrowserIdleTimeout {
+		t.Fatalf("managed daemon idle timeout = %q, want %q", got, managedBrowserIdleTimeout)
+	}
+}
+
+func TestBrowserCommandEnvironmentDoesNotAlterAutoConnectedChromeLifetime(t *testing.T) {
+	t.Setenv("ATHENA_BROWSER_AUTH_MODE", browserAuthModeAutoConnect)
+	t.Setenv(agentBrowserIdleTimeoutEnv, "")
+	if got := environmentValue(browserCommandEnvironment(t.TempDir()), agentBrowserIdleTimeoutEnv); got != "" {
+		t.Fatalf("auto-connect idle timeout = %q, want empty", got)
+	}
+}
+
 func environmentValue(environment []string, key string) string {
 	prefix := key + "="
 	for index := len(environment) - 1; index >= 0; index-- {

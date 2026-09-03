@@ -363,6 +363,26 @@ func verifyAction(
 		verification.Status = "verified"
 		verification.Reason = "page_reload_observed"
 		verification.Evidence = []string{"url_observed"}
+	case "play":
+		playback, _ := raw["playback"].(map[string]any)
+		if boolValue(playback["playing"]) && boolValue(playback["verified"]) {
+			verification.Status = "verified"
+			verification.Confidence = 0.98
+			verification.Reason = "media_playback_observed"
+			verification.Evidence = []string{"playback_playing", "playback_verified"}
+		} else {
+			return uncertainVerification(verification, "media_playback_not_verified", screenshot)
+		}
+	case "pause":
+		playback, _ := raw["playback"].(map[string]any)
+		if boolValue(playback["found"]) && boolValue(playback["paused"]) && !boolValue(playback["playing"]) {
+			verification.Status = "verified"
+			verification.Confidence = 0.97
+			verification.Reason = "media_pause_observed"
+			verification.Evidence = []string{"playback_paused"}
+		} else {
+			return uncertainVerification(verification, "media_pause_not_verified", screenshot)
+		}
 	case "download":
 		verification.Status = "verified"
 		verification.Reason = "download_action_completed_before_observation"

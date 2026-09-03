@@ -182,7 +182,7 @@ func (t *startupTracker) protectingUpdate() {
 	}
 	t.mu.Lock()
 	t.snapshot.Update.State = "applying"
-	t.snapshot.Update.Message = "Creating and verifying an encrypted recovery point before stopping services"
+	t.snapshot.Update.Message = "Stopping services, then creating and verifying an encrypted recovery point"
 	t.snapshot.Update.CanDefer = false
 	t.touchLocked()
 	t.mu.Unlock()

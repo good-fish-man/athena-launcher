@@ -194,6 +194,10 @@ func validateBrowserPagePrecondition(run browserCommandRunner, sessionArgs []str
 	if err != nil {
 		return fmt.Errorf("could not verify the current browser page: %w", err)
 	}
+	current = browserCommandURL(current)
+	if current == "" {
+		return fmt.Errorf("could not verify the current browser page: browser returned no readable URL")
+	}
 	if normalizeBrowserPageURL(current) != normalizeBrowserPageURL(expected) {
 		return fmt.Errorf("browser page changed from %q to %q; refresh the page options before retrying", expected, strings.TrimSpace(current))
 	}

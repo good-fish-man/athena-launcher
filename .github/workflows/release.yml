@@ -66,7 +66,11 @@ jobs:
           mkdir -p dist
           version="${RELEASE_TAG#v}"
           manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
-          go build -trimpath -ldflags "-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifest_url -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$RELEASE_PUBLIC_KEY" -o "dist/$name" ./cmd/athena-launcher
+          ldflags="-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifest_url"
+          if [ -n "$RELEASE_PUBLIC_KEY" ]; then
+            ldflags="$ldflags -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$RELEASE_PUBLIC_KEY"
+          fi
+          go build -trimpath -ldflags "$ldflags" -o "dist/$name" ./cmd/athena-launcher
       - uses: actions/upload-artifact@v7
         with:
           name: athena-launcher-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -99,7 +103,11 @@ jobs:
           version="${RELEASE_TAG#v}"
           manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           mkdir -p dist/bin
-          go build -trimpath -tags "desktop,production" -ldflags "-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifest_url -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$RELEASE_PUBLIC_KEY" -o "dist/bin/athena-launcher-${GOARCH}" ./cmd/athena-launcher
+          ldflags="-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifest_url"
+          if [ -n "$RELEASE_PUBLIC_KEY" ]; then
+            ldflags="$ldflags -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$RELEASE_PUBLIC_KEY"
+          fi
+          go build -trimpath -tags "desktop,production" -ldflags "$ldflags" -o "dist/bin/athena-launcher-${GOARCH}" ./cmd/athena-launcher
           BINARY="dist/bin/athena-launcher-${GOARCH}" VERSION="$version" ARCH="$GOARCH" ./packaging/macos/package-dmg.sh
       - uses: actions/upload-artifact@v7
         with:
@@ -125,7 +133,11 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CGO_ENABLED = "0"
-          go build -trimpath -tags "desktop,production" -ldflags "-s -w -H windowsgui -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifestUrl -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$env:RELEASE_PUBLIC_KEY" -o dist/bin/athena-launcher.exe ./cmd/athena-launcher
+          $ldflags = "-s -w -H windowsgui -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifestUrl"
+          if (-not [string]::IsNullOrWhiteSpace($env:RELEASE_PUBLIC_KEY)) {
+            $ldflags += " -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$env:RELEASE_PUBLIC_KEY"
+          }
+          go build -trimpath -tags "desktop,production" -ldflags $ldflags -o dist/bin/athena-launcher.exe ./cmd/athena-launcher
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -174,7 +186,11 @@ jobs:
           version="${RELEASE_TAG#v}"
           manifest_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/release-manifest.json"
           mkdir -p dist/bin
-          go build -trimpath -tags "desktop,production,webkit2_41" -ldflags "-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifest_url -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$RELEASE_PUBLIC_KEY" -o "dist/bin/athena-launcher-${GOARCH}" ./cmd/athena-launcher
+          ldflags="-s -w -X athena-launcher/internal/launcher/deployment.LauncherVersion=$version -X athena-launcher/internal/launcher/deployment.DefaultManifestURL=$manifest_url"
+          if [ -n "$RELEASE_PUBLIC_KEY" ]; then
+            ldflags="$ldflags -X athena-launcher/internal/launcher/deployment.DefaultReleasePublicKey=$RELEASE_PUBLIC_KEY"
+          fi
+          go build -trimpath -tags "desktop,production,webkit2_41" -ldflags "$ldflags" -o "dist/bin/athena-launcher-${GOARCH}" ./cmd/athena-launcher
       - name: Build AppImage
         env:
           APPIMAGE_ARCH: ${{ matrix.appimage_arch }}
