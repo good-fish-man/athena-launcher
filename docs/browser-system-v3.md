@@ -33,8 +33,9 @@ Athena Launcher
        |
        +---- low confidence / sensitive ----> Re-observe or HITL
        |
-       v
-  Interaction Engine -> Browser Runtime -> agent-browser / CDP
+       +---- semantic target -------------> Interaction Engine -> agent-browser
+       |
+       +---- visual-only target ----------> Pointer Grounding -> guarded CDP input
        |
        v
   Verification -> bounded OBSERVATION -> Agent Runtime
@@ -54,10 +55,11 @@ Search and browser interaction are separate capabilities. When `browser.task` re
 | Risk policy, re-observation, retry and verification | `interaction_engine.go`, `stabilization.go` |
 | Persistent rules, watch mode and event lifecycle | `automation_engine.go` |
 | CDP event monitor with lightweight polling fallback | `automation_cdp.go`, `automation_probe.go` |
+| Short-lived screenshot grounding and guarded CDP pointer input | `pointer_engine.go` |
 | Optional declarative semantic knowledge | `siteknowledge/` |
 | Device Action/Observation transport | `internal/launcher/deployment/device_runtime.go` |
 
-The Browser Runtime supports navigation, click, play, type, hover, select, drag, key press, four-direction scrolling, back, forward, refresh, wait, download, screenshot, observe, automation and close. Element interactions accept observed semantic refs such as `@e12`; model-generated CSS, XPath, JavaScript and coordinates are not accepted.
+The Browser Runtime supports navigation, click, play, type, hover, select, drag, key press, four-direction scrolling, back, forward, refresh, wait, download, screenshot, observe, automation, bounded pointer control and close. Normal element interactions accept observed semantic refs such as `@e12`; model-generated CSS, XPath, JavaScript and ungrounded coordinates are not accepted.
 
 ## Protocols
 
@@ -69,6 +71,8 @@ The Browser Runtime supports navigation, click, play, type, hover, select, drag,
 | `athena.browser.target-resolution.v3` | Candidates, evidence, confidence and decision |
 | `athena.browser.interaction-transaction.v3` | Policy, attempts, verification and duration |
 | `athena.browser.automation.v3` | Persistent automation rule and watch state |
+| `athena.browser.pointer-grounding.v1` | Screenshot, page-revision and coordinate calibration contract |
+| `athena.browser.pointer-result.v1` | Executed pointer action and verification inputs |
 | `athena.capability-handoff.v3` | Browser-to-Search URL resolution handoff |
 
 Target resolution decisions are `execute`, `reobserve`, `ask_user` or `block`. Thresholds rise with action risk. A visually grounded target must have candidate-specific evidence; a whole-page screenshot alone never proves that a candidate matches.
@@ -89,6 +93,19 @@ The default observation budget is:
 Raw DOM, passwords, verification codes, cookie values and screenshot bytes are not persisted in browser state or chat history. Chat history stores only a bounded execution trace: page identity, target candidates, confidence, action budget, verified interaction timings, Search handoff and watch events.
 
 Visual evidence is adaptive. Athena starts with semantic evidence, captures an element or viewport only when visual/spatial intent or low confidence requires it, and exposes at most two validated image attachments to a model that declares image-input support.
+
+## Pointer Control
+
+`browser.pointer` is a fallback for visual-only surfaces such as Canvas, WebGL and unlabeled media overlays. It does not replace `browser.action` and cannot target an ordinary DOM control that has a semantic ref.
+
+1. A viewport screenshot is captured and calibrated against the active CDP page.
+2. The Observation receives an opaque `pointer_grounding` containing the session, screenshot ID, page revision, viewport metrics, allowed coordinate spaces and a two-minute expiry.
+3. The caller must echo those identifiers exactly and provide either `normalized_1000` or screenshot-pixel coordinates.
+4. Launcher verifies the document, URL, viewport, zoom and scroll state again before dispatch.
+5. A local hit test rejects semantic controls, editable fields, frames, credentials, consent/auth/download targets and challenge pages.
+6. The grounding is single-use. Click and drag dispatch through `Input.dispatchMouseEvent`, then require a fresh screenshot or semantic state change for post-action verification.
+
+`move` is low risk, `click` is medium risk, and `drag` requires user approval. Any stale, expired, mismatched, already-used or unverifiable grounding fails closed and requires a new Observation.
 
 ## Verification And Recovery
 
@@ -128,6 +145,9 @@ Automated tests cover:
 - Browser/Search handoff with same-session continuation;
 - automation persistence, event matching, cooldown and lifecycle;
 - CDP monitor fallback without corrupting action status;
+- pointer grounding correlation, expiry, single use and stale-page rejection;
+- high-DPI screenshot calibration, bounded click/drag dispatch and post-action verification;
+- pointer refusal for semantic, editable, framed, sensitive and challenge targets;
 - bounded frontend trace persistence without DOM, cookie or credential leakage.
 
 Real sites can still require user login, CAPTCHA, DRM, regional access or anti-bot intervention. These are represented as takeover Observations and are not bypassed.
@@ -149,7 +169,7 @@ Athena Browser System v3 是 Athena Desktop 的本地通用浏览器子系统。
 - Interaction Engine 负责风险、等待、重观察、重试和结果验证。
 - Search System 只负责发现准确网址，不代替浏览器交互。
 
-浏览器操作只接受页面观察产生的语义 ref，不接受模型编造的 CSS、XPath、JavaScript 或屏幕坐标。默认先使用 Accessibility/ARIA/Focused DOM；语义证据不足时才采集候选区域或视口截图。
+普通浏览器操作只接受页面观察产生的语义 ref，不接受模型编造的 CSS、XPath、JavaScript 或未绑定截图的坐标。默认先使用 Accessibility/ARIA/Focused DOM；只有 Canvas、WebGL 等缺少语义目标的视觉表面，才可使用最新 Observation 生成的短期 `pointer_grounding`。
 
 ### 已实现能力
 
@@ -162,8 +182,18 @@ Athena Browser System v3 是 Athena Desktop 的本地通用浏览器子系统。
 - 每次重要动作后的验证、重观察、可逆重试和熔断；
 - 登录、验证码、二维码、反爬和敏感操作的人工接管；
 - 基于 CDP 事件的 Watch Mode、持久化规则和轻量轮询降级；
+- 基于截图、页面版本和会话校准的受控 `browser.pointer` 移动、点击与拖拽；
 - Browser 与 Search 的结构化 handoff，并在解析网址后继续原 Session；
 - 前端可读执行轨迹及刷新后的安全恢复。
+
+### Pointer 安全边界
+
+- 优先使用 `browser.action` 和 `@ref`；存在语义目标时拒绝 Pointer。
+- Pointer 只接受最新视口截图随 Observation 返回的 `grounding_id`、`screenshot_id` 和 `page_revision`。
+- Grounding 两分钟过期、单次使用；页面、滚动、缩放或视口变化后必须重新截图。
+- Launcher 将截图坐标校准为主 frame 的 CSS viewport 坐标，并在动作前重新命中测试。
+- 输入框、密码、登录、授权、同意、上传、下载、验证码、iframe 和其他敏感目标一律拒绝。
+- 点击和拖拽后必须观察到截图或语义状态变化，否则返回未验证失败；拖拽还必须经过用户审批。
 
 ### 安全与隐私
 

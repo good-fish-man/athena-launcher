@@ -335,6 +335,30 @@ func verifyAction(
 		verification.Status = "verified"
 		verification.Reason = "post_action_state_changed"
 		verification.Evidence = deltaEvidence(delta)
+	case "pointer":
+		if !boolValue(request.Arguments["pointer_executed"]) {
+			return uncertainVerification(verification, "pointer_action_was_not_dispatched", screenshot)
+		}
+		operation := strings.ToLower(stringValue(request.Arguments["pointer_operation"]))
+		if operation == "move" {
+			verification.Status = "observed"
+			verification.Reason = "pointer_move_dispatched_and_page_observed"
+			verification.Evidence = []string{"grounding_validated", "cdp_pointer_dispatched"}
+			break
+		}
+		before := stringValue(request.Arguments["pointer_before_sha256"])
+		after := screenshotSHA256(screenshot)
+		if delta.HasPrevious && delta.Changed {
+			verification.Status = "verified"
+			verification.Reason = "pointer_action_changed_semantic_state"
+			verification.Evidence = append([]string{"grounding_validated", "cdp_pointer_dispatched"}, deltaEvidence(delta)...)
+		} else if before != "" && after != "" && !strings.EqualFold(before, after) {
+			verification.Status = "verified"
+			verification.Reason = "pointer_action_changed_visual_state"
+			verification.Evidence = []string{"grounding_validated", "cdp_pointer_dispatched", "screenshot_changed"}
+		} else {
+			return uncertainVerification(verification, "pointer_action_produced_no_observable_change", screenshot)
+		}
 	case "type", "select":
 		if ref := stringValue(request.Arguments["ref"]); ref == "" {
 			return uncertainVerification(verification, "typed_element_ref_missing", screenshot)
@@ -419,6 +443,14 @@ func screenshotAvailable(screenshot map[string]any) bool {
 	}
 	available, _ := screenshot["available"].(bool)
 	return available
+}
+
+func screenshotSHA256(screenshot map[string]any) string {
+	if screenshot == nil {
+		return ""
+	}
+	artifact, _ := screenshot["artifact"].(map[string]any)
+	return stringValue(artifact["sha256"])
 }
 
 func deltaEvidence(delta IncrementalObservation) []string {

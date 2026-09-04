@@ -82,6 +82,61 @@ func TestChangedClickIsVerifiedWithoutUnnecessaryCapture(t *testing.T) {
 	}
 }
 
+func TestPointerClickUsesPostActionScreenshotForVisualVerification(t *testing.T) {
+	orchestrator := NewOrchestrator(DefaultBudget())
+	page := perceptionPage("https://example.com/canvas", "Canvas", "Unchanged semantic content")
+	orchestrator.Observe(Request{SessionID: "session-pointer", Action: "screenshot"}, page, Providers{})
+	result := orchestrator.Observe(Request{
+		SessionID: "session-pointer", Action: "pointer", Arguments: map[string]any{
+			"pointer_executed": true, "pointer_operation": "click", "pointer_before_sha256": "before",
+			"screenshot": true,
+		},
+	}, page, Providers{Capture: func(CaptureRequest) map[string]any {
+		return map[string]any{
+			"available": true, "scope": "viewport",
+			"artifact": map[string]any{"sha256": "after"},
+		}
+	}})
+	verification := perceptionVerification(t, result)
+	if verification.Status != "verified" || verification.Reason != "pointer_action_changed_visual_state" {
+		t.Fatalf("pointer visual verification = %#v", verification)
+	}
+}
+
+func TestPointerClickFailsClosedWhenNothingChanges(t *testing.T) {
+	orchestrator := NewOrchestrator(DefaultBudget())
+	page := perceptionPage("https://example.com/canvas", "Canvas", "Unchanged semantic content")
+	orchestrator.Observe(Request{SessionID: "session-pointer-stable", Action: "screenshot"}, page, Providers{})
+	result := orchestrator.Observe(Request{
+		SessionID: "session-pointer-stable", Action: "pointer", Arguments: map[string]any{
+			"pointer_executed": true, "pointer_operation": "click", "pointer_before_sha256": "same",
+			"screenshot": true,
+		},
+	}, page, Providers{Capture: func(CaptureRequest) map[string]any {
+		return map[string]any{
+			"available": true, "scope": "viewport",
+			"artifact": map[string]any{"sha256": "same"},
+		}
+	}})
+	verification := perceptionVerification(t, result)
+	if verification.Status != "uncertain" || verification.Reason != "pointer_action_produced_no_observable_change" {
+		t.Fatalf("unchanged pointer verification = %#v", verification)
+	}
+}
+
+func TestPointerMoveIsObservedWithoutClaimingPageMutation(t *testing.T) {
+	orchestrator := NewOrchestrator(DefaultBudget())
+	result := orchestrator.Observe(Request{
+		SessionID: "session-pointer-move", Action: "pointer", Arguments: map[string]any{
+			"pointer_executed": true, "pointer_operation": "move", "screenshot": true,
+		},
+	}, perceptionPage("https://example.com/canvas", "Canvas", "Canvas page"), Providers{})
+	verification := perceptionVerification(t, result)
+	if verification.Status != "observed" || verification.Reason != "pointer_move_dispatched_and_page_observed" {
+		t.Fatalf("pointer move verification = %#v", verification)
+	}
+}
+
 func TestChallengeBlocksActionVerification(t *testing.T) {
 	orchestrator := NewOrchestrator(DefaultBudget())
 	result := orchestrator.Observe(Request{SessionID: "session-blocked", Action: "navigate"}, map[string]any{

@@ -3,8 +3,9 @@ module athena-launcher
 go 1.25.0
 
 require (
-	github.com/good-fish-man/athena-protocol v1.0.0
+	github.com/good-fish-man/athena-protocol v1.1.0
 	github.com/good-fish-man/logx v1.0.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/wailsapp/wails/v2 v2.10.1
 	golang.org/x/net v0.54.0
 )

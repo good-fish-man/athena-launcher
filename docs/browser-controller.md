@@ -41,15 +41,18 @@ Runtime Client
 - `browser.wait`: waits a bounded number of milliseconds, then observes the page again.
 - `browser.download`: downloads a user-requested file by clicking a semantic ref and stores it in Athena's download directory.
 - `browser.screenshot`: captures a page screenshot and returns the local image path.
+- `browser.pointer`: moves, clicks, or drags on a visual-only Canvas/WebGL surface using the latest short-lived `pointer_grounding`; it is rejected when a semantic ref is available.
 - `browser.close`: closes the session.
 
 ## Policy
 
-- `ALLOW`: read-only navigation, extraction, scrolling, waiting, screenshots, and reversible browser interactions such as clicking a public result, typing a search query, or pressing Enter.
-- `ASK_USER`: login, CAPTCHA, QR, 2FA, downloads, uploads, or user takeover.
+- `ALLOW`: read-only navigation, extraction, scrolling, waiting, screenshots, reversible semantic interactions, and grounded pointer move/click operations that pass local validation.
+- `ASK_USER`: login, CAPTCHA, QR, 2FA, downloads, uploads, grounded pointer drag, or user takeover.
 - `BLOCK`: the device runtime refuses execution.
 
 Session IDs are opaque and validated. URLs must be absolute HTTP(S) URLs without embedded credentials. Upload remains blocked until a native file picker supplies a user-approved path.
+
+Pointer coordinates are never accepted on their own. A viewport screenshot Observation must provide a matching `grounding_id`, `screenshot_id`, `page_revision`, coordinate space and expiry. Launcher checks the URL, document, viewport, zoom and scroll state again, refuses semantic/editable/framed/sensitive/challenge targets, consumes the grounding once, and verifies click or drag through a new screenshot or semantic state change.
 
 The browser controller has no public HTTP execution API. All execution arrives through the authenticated Action/Observation WebSocket.
 

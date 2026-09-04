@@ -582,7 +582,7 @@ func deviceObservationError(observation deviceObservation) error {
 
 func minimumDeviceRisk(action deviceAction) string {
 	switch action.Capability {
-	case "app.close", "browser.click", "browser.play", "browser.pause", "browser.type", "browser.press", "browser.download", "browser.close":
+	case "app.close", "browser.click", "browser.play", "browser.pause", "browser.type", "browser.pointer", "browser.press", "browser.download", "browser.close":
 		return deviceRiskReversible
 	default:
 		return deviceRiskReadOnly
@@ -701,7 +701,7 @@ func (d *deviceRuntime) executeCapability(ctx context.Context, action deviceActi
 			CooldownMS: intArgument(action.Arguments["cooldown_ms"]),
 		})
 		return result, sessionID, err
-	case "browser.open", "browser.navigate", "browser.click", "browser.play", "browser.pause", "browser.type", "browser.hover", "browser.select", "browser.drag", "browser.press", "browser.scroll", "browser.back", "browser.forward", "browser.refresh", "browser.wait", "browser.download", "browser.screenshot", "browser.close", "browser.observe":
+	case "browser.open", "browser.navigate", "browser.click", "browser.play", "browser.pause", "browser.type", "browser.hover", "browser.select", "browser.drag", "browser.pointer", "browser.press", "browser.scroll", "browser.back", "browser.forward", "browser.refresh", "browser.wait", "browser.download", "browser.screenshot", "browser.close", "browser.observe":
 		arguments := action.Arguments
 		if arguments == nil {
 			arguments = map[string]any{}

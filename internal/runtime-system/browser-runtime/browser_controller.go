@@ -48,6 +48,7 @@ type browserController struct {
 	taskPlanner    *browserTaskPlanner
 	targetResolver *browserTargetResolver
 	automation     *browserAutomationEngine
+	pointer        *browserPointerEngine
 	sessionLocks   sync.Map
 }
 
@@ -55,7 +56,7 @@ func newBrowserController(home string) *browserController {
 	runtime := newBrowserRuntime(home)
 	controller := &browserController{
 		home: home, runtime: runtime, perception: newPerceptionLayer(home, runtime),
-		taskPlanner: newBrowserTaskPlanner(), targetResolver: newBrowserTargetResolver(),
+		taskPlanner: newBrowserTaskPlanner(), targetResolver: newBrowserTargetResolver(), pointer: newBrowserPointerEngine(),
 	}
 	controller.automation = newBrowserAutomationEngine(home)
 	controller.automation.bind(controller)
@@ -139,6 +140,7 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 	}
 	sessionArgs := b.sessionArgs(request.SessionID)
 	var playback map[string]any
+	var pointerExecution map[string]any
 	var expectedMediaKind, expectedMediaID string
 	switch request.Action {
 	case "navigate":
@@ -449,6 +451,21 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 		result := map[string]any{"screenshot_path": screenshot["path"], "screenshot": screenshot}
 		result = b.observeBrowser(request, result, run, sessionArgs)
 		return result, nil
+	case "pointer":
+		if b.pointer == nil {
+			b.pointer = newBrowserPointerEngine()
+		}
+		var pointerErr error
+		pointerExecution, pointerErr = b.pointer.execute(request, run, sessionArgs)
+		if pointerErr != nil {
+			return nil, pointerErr
+		}
+		request.Arguments["screenshot"] = true
+		request.Arguments["screenshot_scope"] = "viewport"
+		request.Arguments["screenshot_reason"] = "pointer_action_verification"
+		request.Arguments["pointer_before_sha256"] = pointerExecution["before_screenshot_sha256"]
+		request.Arguments["pointer_operation"] = pointerExecution["operation"]
+		request.Arguments["pointer_executed"] = true
 	case "upload":
 		return nil, fmt.Errorf("upload requires the native file picker and user takeover")
 	case "close":
@@ -487,7 +504,19 @@ func (b *browserController) runActionUnlocked(ctx context.Context, request brows
 	if playback != nil {
 		observation["playback"] = playback
 	}
+	if pointerExecution != nil {
+		observation["pointer"] = pointerExecution
+	}
 	observation = b.observeBrowser(request, observation, run, sessionArgs)
+	if request.Action == "pointer" {
+		if verification, ok := browserVerificationFromState(observation); !ok || (verification.Status != "verified" && verification.Status != "observed") {
+			reason := "pointer action did not return verification"
+			if ok && verification.Reason != "" {
+				reason = verification.Reason
+			}
+			return observation, fmt.Errorf("browser pointer action could not be verified: %s", reason)
+		}
+	}
 	return observation, nil
 }
 
@@ -708,6 +737,9 @@ func (b *browserController) observeBrowser(request browserExecuteRequest, observ
 		perception = newPerceptionLayer(b.home, b.runtime)
 	}
 	result := perception.ObserveBrowser(request, observation, run, sessionArgs)
+	if b.pointer != nil {
+		b.pointer.attachGrounding(request.SessionID, result, run, sessionArgs)
+	}
 	if b.automation != nil {
 		automationState := b.automation.sessionState(request.SessionID)
 		result["automation_state"] = automationState
@@ -1116,7 +1148,7 @@ func (b *browserController) capabilities() []string {
 		return []string{
 			"browser.task", "browser.open", "browser.navigate", "browser.observe", "browser.click", "browser.play", "browser.pause", "browser.type", "browser.hover",
 			"browser.select", "browser.drag", "browser.press", "browser.scroll", "browser.back", "browser.forward", "browser.refresh", "browser.wait",
-			"browser.download", "browser.screenshot", "browser.automation", "browser.close",
+			"browser.download", "browser.screenshot", "browser.pointer", "browser.automation", "browser.close",
 		}
 	}
 	return []string{"browser.open", "browser.navigate"}

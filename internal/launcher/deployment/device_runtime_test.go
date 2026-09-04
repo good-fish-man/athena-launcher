@@ -235,6 +235,10 @@ func TestDeviceRuntimeRaisesButNeverLowersRisk(t *testing.T) {
 	if got := raiseDeviceRisk(click.Policy.Risk, minimumDeviceRisk(click)); got != deviceRiskSensitive {
 		t.Fatalf("sensitive server risk was lowered to %q", got)
 	}
+	pointer := testDeviceAction("browser.pointer")
+	if got := raiseDeviceRisk(pointer.Policy.Risk, minimumDeviceRisk(pointer)); got != deviceRiskReversible {
+		t.Fatalf("browser pointer risk = %q, want %q", got, deviceRiskReversible)
+	}
 }
 
 func TestNewDeviceRuntimeRepairsRecoveredObservationDeviceID(t *testing.T) {
@@ -343,7 +347,7 @@ func TestDeviceRuntimeBrowserCapabilitiesReflectInstalledController(t *testing.T
 	}
 	fullRuntime := &deviceRuntime{bridge: newDesktopBridge(home, nil)}
 	fullCapabilities := fullRuntime.capabilities()
-	for _, capability := range []string{"browser.task", "browser.open", "browser.observe", "browser.click", "browser.play", "browser.type", "browser.hover", "browser.select", "browser.drag", "browser.scroll", "browser.back", "browser.forward", "browser.refresh", "browser.wait", "browser.download", "browser.screenshot"} {
+	for _, capability := range []string{"browser.task", "browser.open", "browser.observe", "browser.click", "browser.play", "browser.type", "browser.hover", "browser.select", "browser.drag", "browser.pointer", "browser.scroll", "browser.back", "browser.forward", "browser.refresh", "browser.wait", "browser.download", "browser.screenshot"} {
 		if !hasCapability(fullCapabilities, capability) {
 			t.Fatalf("full browser capability %q missing from %v", capability, fullCapabilities)
 		}

@@ -175,6 +175,74 @@ func TestE2EBrowserV3KeepsSessionAndSelectsSecondResult(t *testing.T) {
 	}
 }
 
+func TestE2EBrowserPointerClicksGroundedCanvas(t *testing.T) {
+	if os.Getenv("ATHENA_BROWSER_E2E") != "1" {
+		t.Skip("set ATHENA_BROWSER_E2E=1 with ATHENA_AGENT_BROWSER_BIN to run the real browser test")
+	}
+	if _, err := os.Stat(os.Getenv("ATHENA_AGENT_BROWSER_BIN")); err != nil {
+		t.Fatalf("ATHENA_AGENT_BROWSER_BIN is unavailable: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, `<!doctype html><html><head><title>Pointer before</title><style>html,body,canvas{position:fixed;inset:0;width:100%;height:100%;margin:0}</style></head><body><canvas id="surface"></canvas><script>const canvas=document.querySelector('#surface');const draw=color=>{canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;const context=canvas.getContext('2d');context.fillStyle=color;context.fillRect(0,0,canvas.width,canvas.height)};draw('#b91c1c');canvas.addEventListener('click',()=>{draw('#15803d');document.title='Pointer after'})</script></body></html>`)
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	controller := newBrowserController(home)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	sessionID, err := controller.ResolveSession("", true, false, server.URL)
+	if err != nil {
+		t.Fatalf("resolve browser session: %v", err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer closeCancel()
+		_, _ = controller.RunAction(closeCtx, Request{SessionID: sessionID, Action: "close", Arguments: map[string]any{}})
+		controller.CloseSession(sessionID)
+	}()
+
+	if _, err := controller.RunAction(ctx, Request{
+		RequestID: "e2e-pointer-open", SessionID: sessionID, Action: "navigate",
+		Arguments: map[string]any{"url": server.URL, "snapshot": true},
+	}); err != nil {
+		t.Fatalf("open pointer fixture: %v", err)
+	}
+	screenshot, err := controller.RunAction(ctx, Request{
+		RequestID: "e2e-pointer-ground", SessionID: sessionID, Action: "screenshot", Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("capture pointer grounding: %v", err)
+	}
+	grounding, ok := screenshot["pointer_grounding"].(map[string]any)
+	if !ok || grounding["available"] != true {
+		t.Fatalf("pointer grounding was not produced: grounding=%#v tab_id=%#v tabs=%#v title=%#v url=%#v", screenshot["pointer_grounding"], screenshot["tab_id"], screenshot["tabs"], screenshot["title"], screenshot["url"])
+	}
+
+	result, err := controller.RunAction(ctx, Request{
+		RequestID: "e2e-pointer-click", SessionID: sessionID, Action: "pointer",
+		Arguments: map[string]any{
+			"operation": "click", "grounding_id": grounding["grounding_id"],
+			"screenshot_id": grounding["screenshot_id"], "page_revision": grounding["page_revision"],
+			"coordinate_space": "normalized_1000", "x": 500.0, "y": 500.0,
+			"purpose": "Change the visual-only canvas state",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute grounded pointer click: %v; state=%#v", err, result)
+	}
+	if title := browserStringValue(result["title"]); title != "Pointer after" {
+		t.Fatalf("pointer click did not change the canvas page: title=%q state=%#v", title, result)
+	}
+	verification, ok := browserVerificationFromState(result)
+	if !ok || verification.Status != "verified" {
+		t.Fatalf("pointer click was not verified: %#v", result["verification"])
+	}
+}
+
 func serverURL(request *http.Request) string {
 	return "http://" + request.Host
 }

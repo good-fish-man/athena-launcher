@@ -10,6 +10,8 @@ GA 运维：[Athena 1.0 安装、升级与恢复](docs/ga-install-upgrade-v1.0.z
 
 源码导航：[项目结构](docs/project-structure.md#简体中文)
 
+开发指南：[启动、浏览器与函数说明](docs/launcher-startup-browser-guide.zh-CN.md)
+
 Athena Launcher 是基于 Wails 的 Athena 桌面应用和本地服务管理器。用户只需下载与操作系统匹配的一个安装包；Launcher 会安装独立 PostgreSQL，下载并校验 Runtime、Client、UI，生成相互兼容的配置，按顺序启动服务，并在原生桌面窗口中展示启动中心和 Athena UI。
 
 桌面外壳使用 Wails v2 和系统 WebView；React UI 仍可作为独立版本化产物更新，但由 Wails 窗口直接加载，不再启动单独的前端 HTTP 服务。

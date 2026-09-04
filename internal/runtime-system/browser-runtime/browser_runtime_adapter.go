@@ -125,6 +125,9 @@ func (b *browserController) CloseSession(sessionID string) {
 	if b.automation != nil {
 		b.automation.CloseSession(sessionID)
 	}
+	if b.pointer != nil {
+		b.pointer.clearSession(sessionID)
+	}
 	b.runtime.CloseSession(sessionID)
 	b.sessionLocks.Delete(sessionID)
 	if b.perception != nil {

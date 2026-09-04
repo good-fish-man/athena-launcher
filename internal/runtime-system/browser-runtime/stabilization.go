@@ -81,7 +81,7 @@ func browserActionStabilityPolicy(request browserExecuteRequest) (browserStabili
 	switch strings.ToLower(strings.TrimSpace(request.Action)) {
 	case "navigate", "open":
 		return browserStabilityPolicy{MaxWait: 2500 * time.Millisecond, Interval: 250 * time.Millisecond, Probes: 4}, true
-	case "click", "press":
+	case "click", "press", "pointer":
 		return browserStabilityPolicy{MaxWait: 1800 * time.Millisecond, Interval: 200 * time.Millisecond, Probes: 4}, true
 	case "type", "scroll":
 		return browserStabilityPolicy{MaxWait: time.Second, Interval: 150 * time.Millisecond, Probes: 3}, true

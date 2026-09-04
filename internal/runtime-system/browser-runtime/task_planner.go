@@ -61,7 +61,7 @@ func (browserTaskPlanner) Plan(request browserTaskRequest) browserTaskPlanningRe
 		Trace: browserTaskPlanningTrace{
 			Schema: browserTaskPlannerSchema, Strategy: strategy, Intent: task.Intent, Signals: signals,
 			Constraints: []string{
-				"semantic_targets_only", "no_model_selectors_or_coordinates", "bounded_reobserve_and_retry",
+				"semantic_targets_preferred", "no_raw_model_coordinates", "pointer_requires_runtime_grounding", "bounded_reobserve_and_retry",
 				"preserve_session_and_tab_context", "verify_every_interaction", "require_hitl_for_sensitive_actions",
 			},
 			MaxActions: 18,
