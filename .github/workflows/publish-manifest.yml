@@ -135,7 +135,8 @@ jobs:
           version="${SERVICE_TAG#v}"
           major="${version%%.*}"
           if [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -ge 1 ]]; then
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/good-fish-man/athena-protocol/${SERVICE_TAG}/compatibility/v1.0.json" --output compatibility-v1.0.json
+            curl --fail --location --retry 3 "https://raw.githubusercontent.com/good-fish-man/athena-protocol/${SERVICE_TAG}/compatibility/v1.0.json" --output compatibility-template-v1.0.json
+            ./scripts/materialize-compatibility-matrix.sh compatibility-template-v1.0.json compatibility-v1.0.json "$SERVICE_TAG" "$MINIMUM_FROM_VERSION"
           else
             printf '{}\n' > compatibility-v1.0.json
           fi

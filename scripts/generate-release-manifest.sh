@@ -14,6 +14,7 @@ OUTPUT=${OUTPUT:-release-manifest.json}
 SBOM_FILE=${SBOM_FILE:-release-sbom.spdx.json}
 COMPATIBILITY_FILE=${COMPATIBILITY_FILE:-compatibility-v1.0.json}
 MINIMUM_FROM_VERSION=${MINIMUM_FROM_VERSION:-0.9.0}
+PROTOCOL_VERSION=${PROTOCOL_VERSION:-}
 DARWIN_CODE_SIGNING_STATUS=${DARWIN_CODE_SIGNING_STATUS:-CHECKSUM_VERIFIED}
 WINDOWS_CODE_SIGNING_STATUS=${WINDOWS_CODE_SIGNING_STATUS:-CHECKSUM_VERIFIED}
 LINUX_CODE_SIGNING_STATUS=${LINUX_CODE_SIGNING_STATUS:-CHECKSUM_VERIFIED}
@@ -133,16 +134,20 @@ if [ "$(release_major "$TAG")" -ge 1 ]; then
   fi
   compatibility_url=$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "compatibility-v1.0.json")
   compatibility_sha=$(sha256 "$COMPATIBILITY_FILE")
+	if [ -z "$PROTOCOL_VERSION" ]; then
+		PROTOCOL_VERSION=$(jq -er '.protocol_version | select(type == "string" and length > 0)' "$COMPATIBILITY_FILE")
+	fi
 elif [ -f "$COMPATIBILITY_FILE" ]; then
   compatibility_url=$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "compatibility-v1.0.json")
   compatibility_sha=$(sha256 "$COMPATIBILITY_FILE")
 fi
+PROTOCOL_VERSION=${PROTOCOL_VERSION:-1.0.0}
 
 jq -n \
 	--arg schema "athena.release-manifest.v1" \
 	--arg release_id "athena-$TAG" \
 	--arg version "${TAG#v}" \
-	--arg protocol_version "1.0.0" \
+	--arg protocol_version "$PROTOCOL_VERSION" \
 	--arg minimum_from_version "$MINIMUM_FROM_VERSION" \
 	--arg sbom_url "$(release_url "$LAUNCHER_REPO" "$LAUNCHER_TAG" "release-sbom.spdx.json")" \
 	--arg sbom_sha "$(sha256 "$SBOM_FILE")" \

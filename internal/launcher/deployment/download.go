@@ -168,7 +168,11 @@ func verifyReleaseCompatibilityData(data []byte, manifest *Manifest) error {
 		return fmt.Errorf("validate release compatibility matrix: %w", err)
 	}
 	if matrix.ReleaseVersion != manifest.Version || matrix.ProtocolVersion != manifest.ProtocolVersion || matrix.MinimumUpgradeVersion != strings.TrimPrefix(manifest.MinimumFromVersion, "v") {
-		return fmt.Errorf("release compatibility matrix does not match manifest versions")
+		return fmt.Errorf(
+			"release compatibility matrix versions (release=%s protocol=%s minimum=%s) do not match manifest versions (release=%s protocol=%s minimum=%s)",
+			matrix.ReleaseVersion, matrix.ProtocolVersion, matrix.MinimumUpgradeVersion,
+			manifest.Version, manifest.ProtocolVersion, strings.TrimPrefix(manifest.MinimumFromVersion, "v"),
+		)
 	}
 	componentVersions := map[string]string{
 		"athena-protocol": manifest.ProtocolVersion,
