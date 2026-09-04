@@ -20,6 +20,7 @@ const (
 
 type State struct {
 	LauncherPID            int               `json:"launcher_pid,omitempty"`
+	LauncherVersion        string            `json:"launcher_version,omitempty"`
 	ManifestSource         string            `json:"manifest_source,omitempty"`
 	Version                string            `json:"version,omitempty"`
 	ConnectionMode         string            `json:"connection_mode,omitempty"`

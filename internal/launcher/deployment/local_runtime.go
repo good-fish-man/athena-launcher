@@ -135,6 +135,7 @@ func runManaged(ctx context.Context, opts options, tracker *startupTracker, cont
 		return err
 	}
 	state.LauncherPID = os.Getpid()
+	state.LauncherVersion = LauncherVersion
 	if err := saveState(opts.home, state); err != nil {
 		return err
 	}

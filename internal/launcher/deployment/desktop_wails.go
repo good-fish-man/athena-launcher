@@ -40,6 +40,9 @@ func launchDesktop(opts options) error {
 	if err := stopLegacyLauncher(opts.home); err != nil {
 		return err
 	}
+	if err := takeOverOlderLauncher(opts.home); err != nil {
+		return err
+	}
 	logFile, err := redirectDesktopLogs(opts.home)
 	if err != nil {
 		return err

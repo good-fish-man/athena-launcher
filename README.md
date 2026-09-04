@@ -179,6 +179,8 @@ A production launcher embeds its release manifest URL during compilation. Develo
 
 At startup, the launcher compares installed hashes with the current manifest. If packages differ, the startup center asks the user before stopping existing processes and installing new versions. Matching packages are reused and are not downloaded twice.
 
+Desktop releases also persist the running launcher version. When a newly installed application is opened while an older Athena process is still holding the single-instance lock, the new launcher requests a graceful handoff before checking service packages. This preserves `~/.athena/data`, secrets, model settings, and browser profiles; deleting `~/.athena` is not part of the upgrade procedure.
+
 If a port is occupied by a process recorded as Athena's managed process, the launcher stops that process before restart. It does not silently terminate unrelated applications. Use Startup Center logs and `athena-launcher status` to identify conflicts.
 
 To reset only downloaded service packages, stop Athena and remove the relevant version under `~/.athena/services` or `~/.athena/packages`; do not remove `~/.athena/data` unless user data should also be erased.

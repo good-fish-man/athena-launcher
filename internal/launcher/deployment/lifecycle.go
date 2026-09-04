@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,58 @@ func startDetached(opts options) error {
 	return nil
 }
 
+// takeOverOlderLauncher prevents an already-running desktop process from
+// swallowing the first launch of a newly installed application through the
+// Wails single-instance lock. The old process owns the same ATHENA_HOME and
+// cooperatively shuts down through stop.request, so user data is left intact.
+func takeOverOlderLauncher(home string) error {
+	return takeOverOlderLauncherWith(home, processStillExists, stopManaged)
+}
+
+func takeOverOlderLauncherWith(home string, processExists func(int) bool, stop func(string) error) error {
+	state, err := loadState(home)
+	if err != nil {
+		return fmt.Errorf("load installation state before launcher handoff: %w", err)
+	}
+	if state.LauncherPID == 0 || state.LauncherPID == os.Getpid() {
+		return nil
+	}
+	if !launcherTakeoverRequired(state.LauncherVersion, LauncherVersion) {
+		return nil
+	}
+	if !processExists(state.LauncherPID) {
+		state.LauncherPID = 0
+		return saveState(home, state)
+	}
+	fmt.Printf("Athena launcher %s is replacing running launcher %s (pid=%d)\n",
+		LauncherVersion, installedLauncherVersion(state.LauncherVersion), state.LauncherPID)
+	if err := stop(home); err != nil {
+		return fmt.Errorf("stop older Athena launcher before version handoff: %w", err)
+	}
+	return nil
+}
+
+func launcherTakeoverRequired(installedVersion, currentVersion string) bool {
+	installedVersion = strings.TrimSpace(installedVersion)
+	currentVersion = strings.TrimSpace(currentVersion)
+	if currentVersion == "" {
+		return false
+	}
+	// LauncherVersion was added after the first public desktop packages. A
+	// running installation without it must be treated as an older launcher.
+	if installedVersion == "" {
+		return true
+	}
+	return compareReleaseSemver(currentVersion, installedVersion) > 0
+}
+
+func installedLauncherVersion(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "legacy"
+}
+
 func stopManaged(home string) error {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return err
@@ -85,7 +138,11 @@ func printStatus(home string) {
 		}
 		pid = state.LauncherPID
 	}
-	fmt.Printf("Version: %s\nLauncher PID: %d\n", version, pid)
+	launcherVersion := "unknown"
+	if state != nil && strings.TrimSpace(state.LauncherVersion) != "" {
+		launcherVersion = state.LauncherVersion
+	}
+	fmt.Printf("Version: %s\nLauncher version: %s\nLauncher PID: %d\n", version, launcherVersion, pid)
 	selection := deploymentFromState(state)
 	if selection.Mode == connectionModeRemote {
 		remoteHealthy := healthyURL(selection.RemoteURL + "/healthz")

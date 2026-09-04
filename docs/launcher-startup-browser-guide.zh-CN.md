@@ -258,6 +258,8 @@ Artifact 先进入临时下载文件，再解压到 staging 目录。`replaceArt
 - `~/.athena/secrets`；
 - `~/.athena/data/skills`。
 
+桌面 Launcher 升级时还会比较 `state.json` 中的 `launcher_version`。新版 App 如果发现旧 Launcher 进程仍在运行，会先进行协作式进程接管，避免 Wails 单实例锁把新版启动请求转交给仍在内存中的旧代码。接管只停止进程并替换版本化程序包，不会清空上述数据目录。
+
 ## 6. 浏览器系统
 
 ### 6.1 两个“浏览器”概念

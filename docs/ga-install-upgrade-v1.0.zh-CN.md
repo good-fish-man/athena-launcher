@@ -29,6 +29,8 @@ Release Manifest 与兼容矩阵采用严格 JSON 解码：未知字段、多个
 
 Runtime Client 迁移保持增量与幂等；发布回归测试会确认代表性的 v0.9 用户、会话和记忆记录在 v1.0 初始化后仍然存在。程序回滚不会删除 PostgreSQL 数据目录。
 
+桌面版会在 `state.json` 记录实际运行的 Launcher 版本。安装新版 App 时，即使旧桌面进程仍持有单实例锁，新 Launcher 也会先通过 `stop.request` 请求旧进程完整退出，再沿用原目录检查和更新服务包。升级不需要删除 `~/.athena`；数据库、账号、模型设置、密钥和浏览器登录态都会保留。
+
 替换 PostgreSQL 程序包不会删除 `~/.athena/data/postgres`。备份密钥独立于自动生成的服务配置。
 
 ## Readiness 命令

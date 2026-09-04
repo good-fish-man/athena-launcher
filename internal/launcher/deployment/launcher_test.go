@@ -11,11 +11,13 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultManifestUsesLatestPublicRelease(t *testing.T) {
@@ -26,6 +28,173 @@ func TestDefaultManifestUsesLatestPublicRelease(t *testing.T) {
 
 	if got := defaultManifest(t.TempDir()); got != publicManifestURL {
 		t.Fatalf("defaultManifest() = %q, want %q", got, publicManifestURL)
+	}
+}
+
+func TestLauncherTakeoverRequired(t *testing.T) {
+	tests := []struct {
+		name      string
+		installed string
+		current   string
+		want      bool
+	}{
+		{name: "legacy state", current: "1.1.5", want: true},
+		{name: "older launcher", installed: "1.1.4", current: "1.1.5", want: true},
+		{name: "same launcher", installed: "1.1.5", current: "1.1.5"},
+		{name: "newer launcher", installed: "1.1.6", current: "1.1.5"},
+		{name: "development build without version", installed: "1.1.4"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := launcherTakeoverRequired(test.installed, test.current); got != test.want {
+				t.Fatalf("launcherTakeoverRequired(%q, %q) = %v, want %v", test.installed, test.current, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTakeOverOlderLauncherRequestsCooperativeStop(t *testing.T) {
+	home := t.TempDir()
+	state, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.LauncherPID = 4242
+	state.LauncherVersion = "1.1.4"
+	state.Version = "1.1.4"
+	state.BrowserProfile = "Default"
+	if err := saveState(home, state); err != nil {
+		t.Fatal(err)
+	}
+
+	originalVersion := LauncherVersion
+	LauncherVersion = "1.1.5"
+	t.Cleanup(func() { LauncherVersion = originalVersion })
+	stopCalls := 0
+	err = takeOverOlderLauncherWith(home, func(pid int) bool {
+		return pid == 4242
+	}, func(gotHome string) error {
+		stopCalls++
+		if gotHome != home {
+			t.Fatalf("stop home = %q, want %q", gotHome, home)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopCalls != 1 {
+		t.Fatalf("stop calls = %d, want 1", stopCalls)
+	}
+	loaded, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Version != "1.1.4" || loaded.BrowserProfile != "Default" {
+		t.Fatalf("launcher handoff mutated user state: %+v", loaded)
+	}
+}
+
+func TestTakeOverOlderLauncherClearsStalePID(t *testing.T) {
+	home := t.TempDir()
+	state, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.LauncherPID = 4242
+	state.LauncherVersion = "1.1.4"
+	state.Version = "1.1.4"
+	state.Installed["agent-runtime"] = "1.1.4"
+	if err := saveState(home, state); err != nil {
+		t.Fatal(err)
+	}
+
+	originalVersion := LauncherVersion
+	LauncherVersion = "1.1.5"
+	t.Cleanup(func() { LauncherVersion = originalVersion })
+	if err := takeOverOlderLauncherWith(home, func(int) bool { return false }, func(string) error {
+		t.Fatal("stale process must not be stopped")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.LauncherPID != 0 {
+		t.Fatalf("stale launcher pid = %d, want 0", loaded.LauncherPID)
+	}
+	if loaded.Version != "1.1.4" || loaded.Installed["agent-runtime"] != "1.1.4" {
+		t.Fatalf("stale PID repair removed installation state: %+v", loaded)
+	}
+}
+
+func TestTakeOverOlderLauncherStopsRunningLegacyProcess(t *testing.T) {
+	if os.Getenv("ATHENA_TEST_LEGACY_LAUNCHER") == "1" {
+		home := os.Getenv("ATHENA_TEST_LAUNCHER_HOME")
+		stopPath := filepath.Join(home, "stop.request")
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(stopPath); err == nil {
+				state, loadErr := loadState(home)
+				if loadErr != nil {
+					os.Exit(2)
+				}
+				state.LauncherPID = 0
+				if saveState(home, state) != nil {
+					os.Exit(3)
+				}
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		os.Exit(4)
+	}
+
+	home := t.TempDir()
+	state, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.LauncherVersion = ""
+	state.Version = "1.1.4"
+	state.BrowserProfile = "Default"
+	if err := saveState(home, state); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestTakeOverOlderLauncherStopsRunningLegacyProcess$")
+	command.Env = append(os.Environ(), "ATHENA_TEST_LEGACY_LAUNCHER=1", "ATHENA_TEST_LAUNCHER_HOME="+home)
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if command.Process != nil && processStillExists(command.Process.Pid) {
+			_ = command.Process.Kill()
+		}
+		_ = command.Wait()
+	})
+	state.LauncherPID = command.Process.Pid
+	if err := saveState(home, state); err != nil {
+		t.Fatal(err)
+	}
+
+	originalVersion := LauncherVersion
+	LauncherVersion = "1.1.5"
+	t.Cleanup(func() { LauncherVersion = originalVersion })
+	if err := takeOverOlderLauncher(home); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("legacy launcher exit: %v", err)
+	}
+	command.Process = nil
+	loaded, err := loadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.LauncherPID != 0 || loaded.Version != "1.1.4" || loaded.BrowserProfile != "Default" {
+		t.Fatalf("launcher handoff did not preserve state: %+v", loaded)
 	}
 }
 
