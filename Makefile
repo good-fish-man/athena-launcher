@@ -1,4 +1,4 @@
-VERSION ?= 1.1.3
+VERSION ?= 1.1.4
 MANIFEST_URL ?= https://github.com/good-fish-man/athena-launcher/releases/latest/download/release-manifest.json
 DIST ?= dist
 FRONTEND_PROJECT ?= ../frontend/agent-ui
